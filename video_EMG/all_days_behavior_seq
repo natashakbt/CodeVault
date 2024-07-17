@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Oct 31 16:10:32 2023
+
+@author: natasha
+"""
+
+
+import numpy as np
+import tables
+import glob
+import os
+import scipy.stats
+import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter1d
+import pandas as pd
+#import pingouin as pg
+from tqdm import tqdm, trange
+import math
+from scipy import signal
+import scipy.stats as stats
+from sklearn.decomposition import PCA
+import seaborn as sns
+import matplotlib.cm as cm
+import matplotlib.gridspec as gridspec
+from tempfile import TemporaryFile
+from matplotlib.colors import LinearSegmentedColormap
+
+
+"""
+######################################
+IMPORTING DATA AND GETTING SETUP
+######################################
+"""
+#functions to search through base folder
+def find_test_day_folder(test_subject, test_day):
+    base_folder = "/media/natasha/drive2/Natasha_Data"  # Path to drive where sorted data is stored
+
+    test_subject_folder = os.path.join(base_folder, test_subject)
+    test_day_folder = os.path.join(test_subject_folder, f"Test{test_day}")
+    
+    if os.path.exists(test_day_folder):
+        return test_day_folder
+    else:
+        return None
+
+
+def search_for_file(root_folder, file_extension):
+    for root, dirs, files in os.walk(root_folder):
+        for file in files:
+            if file.endswith(file_extension):
+                file_path = os.path.join(root, file)
+                return file_path  # Return the file path if found
+
+    return None  # Return None if file is not found
+
+"""
+INPUT RAT NAME, TEST DAY, AND DIG_INs HERE
+"""
+rat_name = "NB27"
+test_days = [1, 2, 3]
+dig_in_numbers = [12, 13, 14, 15] #for taste only
+taste_names = ['sucrose', 'nacl', 'citric acid', 'qhcl'] #IN SEQUENCE with DIG-INs
+
+combined_behavior_matrix = []
+#Finding path to test day folder inside of extradrive (i.e. drive2)
+for test_day in test_days:
+    dirname = find_test_day_folder(rat_name, test_day)
+    if dirname:
+        print(f"dirname is: {dirname}")
+    else:
+        print("Data folder not found.")
+
+    
+    # === Setting up csv data from scored video into tables ===
+    #Searching and reading video scoring results in csv format
+    file_extension = '.csv' 
+    csv_path = search_for_file(dirname, file_extension)
+    scoring_data = pd.read_csv(csv_path)
+    
+    #deleting superflous columns from csv files
+    columns_to_delete = ['Observation id', 'Observation date', 'Description', 'Observation duration', 'Observation type', 
+                         'Source', 'Media duration (s)', 'FPS', 'date', 'test num', 'Subject', 
+                         'Behavioral category', 'Media file name', 'Image index', 'Image file path', 'Comment']
+    for column in columns_to_delete:
+        del scoring_data[column]
+     
+    #seperating scoring table into two tables.
+    mask = scoring_data.iloc[:, 0] == 'trial start' #all trial starts (120 rows)
+    vid_trial_table = scoring_data[mask]
+    behavior_table = scoring_data[~mask] #all scored behavior of rat
+    
+    
+    # === Importing EMG blech_clust results ===
+    #finding path to EMG data
+    file_extension = '.h5' 
+    h5_path = search_for_file(dirname, file_extension)
+    if not h5_path:
+        print("Path to H5 file not found!")
+    h5 = tables.open_file(h5_path, 'r')    
+    
+    
+    '''
+    # === Creating table_with_trial_info ===
+    # Each row is trial # out of total (usually 120) ===
+    # and it tells you (taste #, presentation # of that taste) ===
+    #  Needed to match with video trials ===
+    '''
+    
+    dig_in_index = [i for i in range(len(dig_in_numbers))]
+    
+    trial_time_index = []
+    
+    ###this part takes a while to run
+    for number in tqdm(dig_in_numbers):
+        dig_in = h5.get_node("/digital_in", f"dig_in_{number}")[:]
+        indices = [i for i in range(1, len(dig_in)) if dig_in[i] == 1 and dig_in[i-1] == 0]
+        trial_time_index.append(indices)
+    
+    all_trial_indices = sorted(sum(trial_time_index, []))
+    
+    table_with_trial_info = []
+    counters = [0] * len(dig_in_index)
+    
+    for i in all_trial_indices:
+        for j, valve_index in enumerate(trial_time_index):
+            if i in valve_index:
+                table_with_trial_info.append([dig_in_index[j], counters[j]])
+                counters[j] += 1
+                break
+        else:
+            print("Match not found between trial_time_index and all_trial_index")
+       
+        
+    #importing EMG data
+    emg_path = os.path.join(os.path.dirname(h5_path), "emg_output")
+    
+    ### DOUBLE CHECK THIS IS RIGHT FOR YOUR RAT
+    filt_ad = np.load(emg_path + '/emgAD/emg_filt.npy')
+    filt_sty = np.load(emg_path + '/emgSTYone/emg_filt.npy')
+    env_ad = np.load(emg_path + '/emgAD/emg_env.npy')
+    env_sty = np.load(emg_path + '/emgSTYone/emg_env.npy')
+    
+    
+    '''
+    extra stuff
+    '''
+    trial_post_stim = 5000 # original: 5000
+    
+    #re-arranging into desired order
+    desired_order = ['gape', 'mouth movements', 'tongue protrusion', 'lateral tongue protrusion', 'unknown mouth movement']
+    behavior_names = desired_order
+    
+    
+    '''
+    NEW PLOT IN PROGRESS
+    '''
+    
+    '''
+    #figuring out like-trials 
+    to create heat map of intensity for pal/non-pal
+    '''
+    
+    #table_with_trial_info
+    in_view_mask = vid_trial_table.iloc[:,2] == 'in view'
+    good_trial_table = vid_trial_table[in_view_mask]
+    
+    suc_trials = [] 
+    nacl_trials = []
+    ca_trials = []
+    qhcl_trials = []
+    for index, row in good_trial_table.iterrows():
+        modifier_value = row['Modifier #1']
+        temp_tastant = table_with_trial_info[int(modifier_value)][0]
+        if temp_tastant == 0:
+            suc_trials.append(int(modifier_value))
+        elif temp_tastant == 1:
+            nacl_trials.append(int(modifier_value))
+        elif temp_tastant == 2:
+            ca_trials.append(int(modifier_value))
+        elif temp_tastant == 3:
+            qhcl_trials.append(int(modifier_value))
+    
+    pal_trials = suc_trials
+    unpal_trials =  qhcl_trials
+    
+    '''Input condition you want to plot here'''
+    plotting_condition = 'pal' #'unapl' or 'pal' only!
+    ''''''''
+    
+    # Define the time bin parameters (adjust these as needed)
+    time_bin_width_ms = 100  # Width of each time bin in milliseconds
+    #num_time_bins = int((trial_pre_stim + trial_post_stim) / time_bin_width_ms)
+    num_time_bins = int((trial_post_stim) / time_bin_width_ms)
+    
+    # Create a matrix to store behavior occurrences (initialize to zeros)
+    behavior_matrix = np.zeros((len(behavior_names), num_time_bins))
+    
+    # Iterate through either unpalatable trials or palatable
+    for trial in tqdm(unpal_trials if plotting_condition == 'unpal' else pal_trials):
+        trial_start_time = vid_trial_table.iloc[trial - 1, 4]
+        #trial_start_time -= (trial_pre_stim / 1000)
+    
+        trial_behaviors = behavior_table[(behavior_table['Time'] >= trial_start_time) & (behavior_table['Time'] <= trial_start_time + (trial_post_stim / 1000))]
+    
+        trial_behaviors = trial_behaviors[trial_behaviors['Behavior'] != 'out of view']
+        
+        
+        tmp_behaviors_dict = {i: None for i in desired_order}
+        for index,row in trial_behaviors.iterrows(): 
+            if tmp_behaviors_dict[row[0]] == None:
+                tmp_behaviors_dict[row[0]] = [(row[4]-trial_start_time)*1000]
+            else:
+                tmp_behaviors_dict[row[0]].extend([(row[4]-trial_start_time)*1000])
+                
+                
+        for key, value in tmp_behaviors_dict.items():
+            if isinstance(value, list):
+                tmp_behaviors_dict[key] = [(value[i], value[i + 1]) 
+                                       for i in range(0, len(value) - 1, 2)]
+        #re-arranging into desired order
+    
+        rearranged_tmp_dict = {key: tmp_behaviors_dict[key] for key in desired_order if key in tmp_behaviors_dict}
+    
+        # Add any keys not in the desired order
+        for key in tmp_behaviors_dict:
+            if key not in rearranged_tmp_dict:
+                rearranged_tmp_dict[key] = tmp_behaviors_dict[key]
+                
+        #Figuring out how may bins each behavior belongs in        
+        for behavior, intervals in rearranged_tmp_dict.items():
+            if intervals is None:
+                continue  # Skip over intervals that are None
+            
+            behavior_idx = desired_order.index(behavior)  # Get the index of the behavior
+            
+            for interval in intervals:
+                start_time, end_time = interval
+                
+                # Calculate the time bin indices for the interval
+                start_bin = int((start_time) / time_bin_width_ms)
+                end_bin = int((end_time) / time_bin_width_ms)
+                
+                # Increment the corresponding bins in behavior_matrix
+                for bin_idx in range(start_bin, end_bin):
+                    behavior_matrix[behavior_idx, bin_idx] += 1
+    combined_behavior_matrix.append(behavior_matrix)
+
+edt_combined_behavior_matrix = np.array(combined_behavior_matrix)
+edt_combined_behavior_matrix = np.sum(combined_behavior_matrix, axis=0)
+
+
+# Create a heatmap of behavior occurrences
+plt.figure(figsize=(12, 8))
+cax = plt.imshow(edt_combined_behavior_matrix, cmap='viridis', aspect='auto', interpolation='none') #try magma or viridis
+plt.colorbar(cax, label='Behavior Occurrences')
+plt.xlabel('Time (ms)')
+plt.ylabel('Behaviors')
+
+plt.yticks(np.arange(len(desired_order)), desired_order)
+#plt.xticks(np.arange(0, num_time_bins, num_time_bins // 10), np.arange(-trial_pre_stim, trial_post_stim + 1, (trial_pre_stim + trial_post_stim) // 10))
+
+
+if plotting_condition == 'unpal':
+    title_suffix = f'Unpalatable tastants (total trials = {len(unpal_trials)})'
+else:
+    title_suffix = f'Palatable tastants (total trials = {len(pal_trials)})'
+
+plt.title(
+    f'{rat_name}, Test Day {test_day}\n{title_suffix}')
+
+plt.show()
+
+
