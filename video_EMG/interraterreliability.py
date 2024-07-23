@@ -12,7 +12,9 @@ Prerequisites:
 - Base folder must contain subfolders for each rat.
 - Each rat's folder should have subfolders named "Test#" or "test#".
 - Each test folder must contain two CSV files exported from BORIS, named with the scorer's initials.
-- CSV file must have behaviors in pairs and alternating START and STOP. 
+- CSV file must have 
+    - trial start times coded as point events, with a modifier including 'in view'
+    - behaviors coded as state events with alternating START and STOP times. 
 - In CSV, all trials with 'in view' modifier must be scored
 
 Structure:
@@ -26,28 +28,11 @@ Structure:
 
 """
 
-import numpy as np
-import tables
 import glob
 import os
-import scipy.stats
-import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter1d
 import pandas as pd
-#import pingouin as pg
-from tqdm import tqdm, trange
 import math
-from scipy import signal
-import scipy.stats as stats
-from sklearn.decomposition import PCA
-import seaborn as sns
-import matplotlib.cm as cm
-import matplotlib.gridspec as gridspec
-from tempfile import TemporaryFile
-from matplotlib.colors import LinearSegmentedColormap
-import json
 from sklearn.metrics import cohen_kappa_score
-from sklearn.metrics import confusion_matrix
 from scipy.stats import pearsonr
 
 
@@ -55,8 +40,7 @@ from scipy.stats import pearsonr
 base_folder = '/media/natasha/drive2/Natasha_Data' # contains folders of all rats' data
 
 rat_list = ["NB35", "NB32", "NB34"] # List of all rats to be analyzed
-#rat_list = ["NB32"]
-test_day = [1, 2, 3] # Greatest number of test days
+test_day = [1, 2, 3] # Greatest number of test days. If not all animals have this number of test days, you'll get a warning but it can be ignored
 scorer_initials = ['YW', 'NBT']  # ONLY TWO! Initials of scorers (as indicated in csv file names)
 '''# ===================================================================='''
 
@@ -83,7 +67,6 @@ def add_lists(list1, list2):
     for elem1, elem2 in zip(list1, list2):
         result.append(elem1 + elem2)
     # Return a new list with the results
-    
     return result
 
 # =============================================================================
@@ -138,18 +121,12 @@ for csv_path in csv_paths:
  
 keys_list = list(scoring_dict.keys())
 
-# ## Saving scoring table as an .npy file to dirname
-# os.chdir(dirname)
-# new_filename = f'{rat_name}_test{test_day}_comparison_dict.npz'
-# np.savez(new_filename, scoring_dict)
-
-
 # =============================================================================
 # Create lists, behaviors_i_care_about, unique_behaviors, and common_trials
 # that are important for the inter-rater reliability analyses below
 # =============================================================================
 
-# Set behaviors of interest for analyses
+# Set behaviors of interest for analyses, everything else will not be analyzed
 behaviors_i_care_about = ['mouth or tongue movement', 'gape', 'lateral tongue movement']
 
 # Create a list of all unique behaviors in scoring_dict
@@ -179,7 +156,6 @@ for i in range(0, len(scoring_dict), 2):
 # =============================================================================
 # INTER-RATER RELIABILITY ANALYSES
 # =============================================================================
-
 # === Analyzing frequency (correlation) and presence/absense (Cohen's Kappa) of a behavior between scorers  ===
 
 # Initialize behavior frequency dictionary for each scorer with zeroes
@@ -392,6 +368,4 @@ for behavior in behaviors_i_care_about:
     percent_overlap = my_list.count(2)/(my_list.count(1) + my_list.count(2))
     print("fraction of overlap for", behavior, "is: ", round(percent_overlap, 4))
         
-    
-# TODO: add plotting stuff here. Have it run through all common_trials and save the graphs
 
