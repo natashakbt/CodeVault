@@ -4,8 +4,29 @@
 Created on Wed Jun 28 14:57:39 2023
 
 @author: natasha
-"""
 
+
+This script creates npz and npy files necessary for future analyses and plots.
+- [rat]_[test]_[scorer]_scoring_dict.npz
+    ->  dictionary where first level of keys either 'trial_start' or 'behavior'
+    -> 'trial start' then has keys 
+- [testname]_emg_dict.npz  
+
+Prerequisites:
+- Base folder must contain subfolders for each rat.
+- Each rat's folder should have subfolders named "Test#" or "test#".
+- Each test folder must contain the following files:
+    - .CSV file(s) exported from BORIS
+    - [testname].h5
+    - emg_env.npy and emg_filt.npy inside folder "emgad", "emgAD", "emgsty", and/or "emgSTY"
+
+Structure:
+1. 
+
+
+"""
+# TODO: make dictionaries into data frames?
+# TODO: save into folders
 
 import numpy as np
 import tables
@@ -32,14 +53,14 @@ import json
 
 
 '''# =========INPUT BASE FOLER, RAT NAME and TEST DAY NUM HERE============'''
-base_folder = '/media/natasha/drive2/Natasha_Data' #contains folders of all rats' data
+base_folder = '/media/natasha/drive2/Natasha_Data' # Must contain folder with rat's name
 
 rat_name = "NB34"
 test_day = 3
 scorers = ['YW', 'NBT']
 '''# ===================================================================='''
 
-#Finding path to test day folder inside of base_folder
+# Find path to test day folder inside of base_folder
 dirname = os.path.join(os.path.join(base_folder, rat_name), f"Test{test_day}")
 if not os.path.exists(dirname):
     dirname = os.path.join(os.path.join(base_folder, rat_name), f"test{test_day}")
@@ -52,9 +73,9 @@ if not os.path.exists(dirname):
 #Creating scoring_dict: processed scored behavior data from BORIS csv files
 #==============================================================================
 '''
-## Transforming csv files exported from BORIS into a dictionary used for analysis
-csv_path = glob.glob(os.path.join(dirname, '**', '*.csv'), recursive=True) #finding all csv files
-for path in csv_path.copy(): #Removing the electrode_layout.csv
+## Transform csv files exported from BORIS into a dictionary used for analysis
+csv_path = glob.glob(os.path.join(dirname, '**', '*.csv'), recursive=True) # Find all csv files
+for path in csv_path.copy(): # Remove the electrode_layout.csv file from paths
     if 'electrode_layout' in path:
         csv_path.remove(path)
  
@@ -72,7 +93,7 @@ if len(csv_path) > 2:
     else:
         # If no path contains 'final', keep the first path
         csv_path = csv_path[0]
-   
+# TODO: FIX THE ABOVE TO ANALYZE ALL SCORER'S RESULTS   
 if not csv_path : 
     print('No scoring csv files found!')
 else :
