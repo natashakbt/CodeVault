@@ -6,29 +6,13 @@ Created on Fri Apr  5 10:08:49 2024
 @author: natasha
 """
 
-### FIX THIS TO SPECIFY WHICH SCORER YOU WANT TO ANALYZE!!!!!
-
-
+### TODO: Add info in the title about rat name, scorer, taste, test day
 
 import numpy as np
-import tables
 import glob
 import os
-import scipy.stats
 import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter1d
 import pandas as pd
-#import pingouin as pg
-from tqdm import tqdm, trange
-import math
-from scipy import signal
-import scipy.stats as stats
-from sklearn.decomposition import PCA
-import seaborn as sns
-import matplotlib.cm as cm
-import matplotlib.gridspec as gridspec
-from tempfile import TemporaryFile
-from matplotlib.colors import LinearSegmentedColormap
 import json
 
 '''===================================================================='''
@@ -39,21 +23,8 @@ base_folder = '/media/natasha/drive2/Natasha_Data' #contains folders of all rats
 rat_name = 'NB34'
 test_day = 3
 trial = 64 #trial num out of 120 with first trial =1
+scorer = 'YW'
 '''===================================================================='''
-
-
-#TO LOAD THIS DICTIONARY IN THE FUTURE:
-#import numpy as np
-#loaded_dict = np.load('NB32_test1_scoring_dict.npz', allow_pickle=True)
-#scoring_dict = dict(loaded_dict)
-
-'''
-# Load info file
-info_file_path = glob.glob(os.path.join(dirname, '*', '*.info'))[0]
-info_dict = json.load(open(info_file_path,'r'))
-'''
-
-
 
 
 '''
@@ -61,8 +32,7 @@ info_dict = json.load(open(info_file_path,'r'))
 # Importing data and getting setup
 #==============================================================================
 '''
-#Finding path to test day folder inside of base_folder
-
+#Find path to test day folder inside of base_folder
 dirname = os.path.join(os.path.join(base_folder, rat_name), f"Test{test_day}")
 if not os.path.exists(dirname):
     dirname = os.path.join(os.path.join(base_folder, rat_name), f"test{test_day}")
@@ -74,28 +44,29 @@ path_info_file = glob.glob(os.path.join(dirname, '*', '*.info'))[0]
 info_dict = json.load(open(path_info_file,'r'))
 
 # Load scoring dictionary within npz file
-path_scoring_dict = glob.glob(os.path.join(dirname,'*scoring_dict.npz'))[0]
-#scoring_dict = dict(np.load(path_scoring_dict, allow_pickle=True))
+test_path_scoring_dict = glob.glob(os.path.join(dirname, f'*{scorer}_scoring_dict.npz'))
+if not test_path_scoring_dict:
+    print(f"Error: No scoring dictionary file found for '{scorer}'")
+
+path_scoring_dict = test_path_scoring_dict[0]
+
+# scoring_dict = dict(np.load(path_scoring_dict, allow_pickle=True))
 loaded_npz = np.load(path_scoring_dict, allow_pickle=True)
 # Convert the loaded data back to a dictionary of DataFrames
 scoring_dict = {key: pd.DataFrame(loaded_npz[key].item()) for key in loaded_npz}
 vid_trial_start = scoring_dict['trial_start']
 behavior_table = scoring_dict['behavior']
 
-'''
-path_emg_dict = glob.glob(os.path.join(dirname,'*emg_dict.npz'))[0]
-emg_dict = dict(np.load(path_emg_dict, allow_pickle=True))
-'''
 
-## CODE TO IMPORT EMG DATA BELOW - IN PROGRESS
-# Load the npz file
+# Import EMG data by loading the npz file
 path_emg_dict = glob.glob(os.path.join(dirname, '*emg_dict.npz'))[0]
 loaded_npz = np.load(path_emg_dict, allow_pickle=True)
 
 # Convert the loaded data back to a dictionary with tuple keys
 loaded_emg_dict = {tuple(key.split('_')): loaded_npz[key] for key in loaded_npz}
 print(loaded_npz[key] for key in loaded_npz)
-# Now you should be able to access the data within loaded_emg_dict
+
+# Now access the data within loaded_emg_dict
 # Example to access specific EMG data (assuming you know the keys)
 emg_ad_filt = loaded_emg_dict[('emgad', 'emg', 'filt.npy')]
 emg_ad_env = loaded_emg_dict[('emgad', 'emg', 'env.npy')]
@@ -104,31 +75,20 @@ emg_ad_env = loaded_emg_dict[('emgad', 'emg', 'env.npy')]
 
 # Print statements to verify access
 print('EMG AD Filtered Data:', emg_ad_filt)
-print('EMG AD Envelope Data:', emg_ad_env)
+print('EMG AD Enveloped Data:', emg_ad_env)
 #print('EMG STY Filtered Data:', emg_sty_filt)
 #print('EMG STY Envelope Data:', emg_sty_env)
 
 
-## End of EMG data importing
-
-
-
-# First digit is which taste #. Second digit is taste presentation #
+# Load trial info
+# First digit is which tastant by #. Second digit is taste presentation #
 path_trial_info = glob.glob(os.path.join(dirname,'*trial_info.npy'))[0]
 trial_info = np.load(path_trial_info)
 
 
-# === Importing EMG blech_clust results ===
-#finding path to EMG data
-#h5_path = glob.glob(os.path.join(dirname, '*', '*.h5'))[0]
-
-#if not h5_path:
-#    print("Path to H5 file not found!")
-#h5 = tables.open_file(h5_path, 'r')    
-
 '''
 #==============================================================================
-# PLOTTING: NEED TO UPDATE
+# PLOTTING
 #==============================================================================
 '''
 
@@ -139,50 +99,47 @@ top subplot is scored behavior
 middle is AD EMG, bottom is STY EMG
 Across a few seconds of a given trial
 ######################################
-NECESSARY PLOTTING INPUT HERE:
-Input the single trial (first trial = 1)
-and time pre-stimulus and post-stimulus delivery
 """
 
-
+# Adjust how much time to plot on the x-axis
 trial_pre_stim = 500 # in ms
 trial_post_stim = 5000 # in ms
 
 trial_len = trial_pre_stim + trial_post_stim
 
-# === Preparing behavior data for plotting ===
-# determine start and end time of the trial based on video time
-#trial_start_time = vid_trial_table.iloc[trial-1, 4]
+# === Prepare behavior data for plotting ===
+# Determine start and end time of the trial based on video time
+
 trial_start_time = None
 for index, row in vid_trial_start.iterrows():
     if row[1] == str(trial):
         trial_start_time = row[4]
-#trial_start_time = vid_trial_start.iloc[trial-1, 4]
-trial_end_time = trial_start_time + (trial_post_stim/1000) #determine end of trial in video time 
-trial_start_time -= (trial_pre_stim/1000) #original: 0.5
 
-#table of all behavior data within trial start and stop time
+trial_end_time = trial_start_time + (trial_post_stim/1000) # End of trial in video time 
+trial_start_time -= (trial_pre_stim/1000)
+
+# Create table of all behavior data within trial start and stop time
 trial_behaviors = behavior_table[(behavior_table['Time'] >= trial_start_time) 
                                  & (behavior_table['Time'] <= trial_end_time)]
 
 trial_behaviors = trial_behaviors[trial_behaviors['Behavior'] != 'out of view']
 
 
-#Creating dictionary where key is all unique behaviors
+# Create dictionary where key is all unique behaviors
 unique_behaviors = list(set(behavior_table['Behavior']))
 behaviors_dict = {i: None for i in unique_behaviors}
 
-# loop through all behaviors in dict
-# append time any time the behavior starts or stops
+# Loop through all behaviors in dict
+# Append time any time the behavior starts or stops
 for index,row in trial_behaviors.iterrows(): 
-    #converting video time to ephys time
+    # Convert video time to ephys time
     temp_time = [((row[4]-trial_start_time)/(trial_end_time - trial_start_time))*trial_len]
     if behaviors_dict[row[0]] == None:
         behaviors_dict[row[0]] = temp_time
     else:
         behaviors_dict[row[0]].extend(temp_time)
 
-#converts the list within each index
+# Convert the list within each index
 # into a list of tuples containing pairs of consecutive values
 # [(first_start_time, first_stop_time), (etc.)}]
 for key, value in behaviors_dict.items():
@@ -190,7 +147,7 @@ for key, value in behaviors_dict.items():
         behaviors_dict[key] = [(value[i], value[i + 1]) 
                                for i in range(0, len(value) - 1, 2)]
 
-#re-arranging into desired order
+# Re-arrang into desired order
 desired_order = ['gape', 'mouth movements', 'tongue protrusion', 'lateral tongue movement', 'unknown mouth movement', 'other']
 
 rearranged_dict = {key: behaviors_dict[key] for key in desired_order if key in behaviors_dict}
@@ -206,18 +163,14 @@ new_dict = {key: rearranged_dict[key] for key in keys_to_keep if key in rearrang
 rearranged_dict = new_dict
 
 print(rearranged_dict)
-# Making list of behavior names and time intervals
-# Needed for ease of plotting
+# Make list of behavior names and time intervals, needed for ease of plotting
 behavior_names = list(rearranged_dict.keys())
 time_intervals = list(rearranged_dict.values())
 
 
+custom_colors = ['#3B75AF', '#AFC7E8', '#EF8636']  # Hex color codes for plotting
 
-
-# Update this list with the hex color codes you want to use
-custom_colors = ['#3B75AF', '#AFC7E8', '#EF8636']  # Example hex color codes
-
-plt.rcParams.update({'font.size': 14})  # You can adjust the size as needed
+plt.rcParams.update({'font.size': 14})  # Adjust font size as needed
 
 # Create a figure and axis
 fig, (ax1, ax2) = plt.subplots(2, 1,
@@ -246,8 +199,8 @@ for i, intervals in enumerate(time_intervals):
 emg_trial = trial_info[trial-1][1]
 emg_taste = trial_info[trial-1][0]  # suc=0; nacl=1; ca=2; qhcl=3
 
-# Making xlims for EMG data based on input in section above
-# EMG trial is 0>7000ms, 2000 pre-stim + 5000 post-stim
+# Set xlims for EMG data based on input in section above
+# Max time to plot a trial because of EMG limits is 0 to 7000ms, 2000 pre-stim + 5000 post-stim
 my_xlims = np.arange((-1 * trial_pre_stim + 2000), (trial_post_stim + 2000))
 
 # Putting color on subplot 2 that matches with behavior intervals
@@ -262,10 +215,11 @@ emg_data_plot = [emg_ad_filt]
 ax2.plot(emg_ad_env[emg_taste, emg_trial, my_xlims], color='0.4')
 ax2.set_ylabel('EMG signal envelope (mV)')
 
-### Putting dashed line at trial delivery, as set in section above.
+# Put dashed line at trial delivery, as set in section above.
 ax1.axvline(trial_pre_stim, linestyle='--', color='gray')  
 ax2.axvline(trial_pre_stim, linestyle='--', color='gray')
 
+### TODO: FIX THIS!!!
 # Set title
 # fig.suptitle(
 #     f'{rat_name}, Test Day {test_day}\nTrial {trial}: delivery#{emg_trial} of {taste_names[emg_taste]}',
