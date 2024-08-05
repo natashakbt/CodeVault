@@ -9,78 +9,173 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
+from sklearn.mixture import GaussianMixture
 import os
 import umap
 import glob
 import diptest
 
 
-
-# Load data
-file_path = '/home/natasha/Desktop/clustering_data/mtm_clustering_df.pkl'
+# ==============================================================================
+# Load data and get setup
+# ==============================================================================
+dirname = '/home/natasha/Desktop/clustering_data/'
+file_path = os.path.join(dirname, 'mtm_clustering_df.pkl')
 df = pd.read_pickle(file_path)
 
 # Make a dataframe of just mouth or tongue movement events
 mtm_bool = df.event_type.str.contains('mouth or tongue movement')
-mtm_df = df.loc[mtm_bool]
+mtm_df_all = df.loc[mtm_bool]
 
-# Says what number session
-mtm_df.session_ind
-
-# Array of every MTM events, and value for each of the 8 features
-mtm_features = np.stack(mtm_df.features.values)
-
-
-# Make UMAP plot of all MTM events
-reducer = umap.UMAP()
-
-scaled_mtm_features = StandardScaler().fit_transform(mtm_features)
-
-embedding = reducer.fit_transform(scaled_mtm_features)
-plt.scatter(embedding[:,0], embedding[:,1])
-plt.title('UMAP projection of MTM events')
-
-# Make UMAP plot of all MTM events for EACH SESSION
-
-for session in df.session_ind.unique():
-    mtm_session_bool = mtm_df.session_ind.astype(str).str.contains(str(session))
-    mtm_session_df = mtm_df.loc[mtm_session_bool]
-    mtm_session_features = np.stack(mtm_session_df.features.values)
-    reducer = umap.UMAP()
-    scaled_mtm_session= StandardScaler().fit_transform(mtm_session_features)
-    embedding = reducer.fit_transform(scaled_mtm_session)
-    plt.scatter(embedding[:,0], embedding[:,1])
-    plt.title(f'UMAP projections of MTM events for session {session}')
-    plt.show()
-    
-# Test which segments are bimodal
+# ==============================================================================
+# Remove any bimodal-shaped EMG segments
+# ==============================================================================
+# Test which segments are bimodal using diptest statistic
 p_values = []
-segment_raw = mtm_df['segment_raw']
+segment_raw = mtm_df_all['segment_raw']
 for index, segment in enumerate(segment_raw):
     dip, pval = diptest.diptest(segment)
     p_values.append(pval)
 
-mtm_df.loc[:,'p_value'] = p_values
+# Add p-value to dataframe
+mtm_df_all.loc[:,'p_value'] = p_values
+# Select MTMs that have a significant p-value
+mtm_df_multi = mtm_df_all[mtm_df_all['p_value'] < 0.005]
 
-mtm_df_multi = mtm_df[mtm_df['p_value'] < 0.005]
-# mtm_df_uni = mtm_df[mtm_df['p_value'] >= 0.005]
 
-# Create plots folder
-output_dir = 'plots'
+# Create folder for plots of multimodal segments
+output_dir = os.path.join(dirname, 'multimodal_segments')
 os.makedirs(output_dir, exist_ok=True)
-# Remove any files in plots folder
+# Remove any png files in plots folder
 png_files = glob.glob(os.path.join(output_dir, '*.png'))
 for file in png_files:
     os.remove(file)
 
-# Plot all bimodal waveforms. Double check that the look ok
+# Plot all bimodal waveforms. You should double check that they look OK
 for index, row in mtm_df_multi.iterrows():
     segment = row['segment_raw']
     plt.plot(segment)
-    plt_title = f"plot_{index}.png"
+    plt_title = f"segment_{index}.png"
     plt.savefig(os.path.join(output_dir, plt_title))
     plt.clf()
 
-percent_multi = len(mtm_df_multi)/len(mtm_df)*100
-print('Percent of multimodal waveforms out of total:', percent_multi)
-#TODO: 
+percent_multi = len(mtm_df_multi)/len(mtm_df_all)*100
+print(f'Percent of multimodal waveforms of total: {percent_multi:.2f}%')
+
+
+
+
+# ==============================================================================
+# Create UMAP projection of all MTM events and by session. 
+# Fit a GMM to the UMAP projection
+# Calculate BIC score to determine best number of GMM clusters
+# ==============================================================================
+
+
+# Create directory for saving UMAP clustering results
+umap_dir = os.path.join(dirname, 'UMAP_results')
+os.makedirs(umap_dir, exist_ok=True)
+# Remove any png files in plots folder
+png_files = glob.glob(os.path.join(umap_dir, '*.png'))
+for file in png_files:
+    os.remove(file)
+
+# Use the unimodal MTM waveforms for the rest of the analyses
+mtm_df = mtm_df_all[mtm_df_all['p_value'] >= 0.005]
+# Array of every MTM event and their values for each of the 8 features
+mtm_features = np.stack(mtm_df.features.values)
+
+# UMAP dimmentionality reduction and feature scaling
+reducer = umap.UMAP()
+n_components_range = range(1, 10)  # Define a range of cluster numbers to test
+scaled_mtm_features = StandardScaler().fit_transform(mtm_features) # Scale features
+embedding = reducer.fit_transform(scaled_mtm_features) # UMAP embedding
+
+# Determine the optimal number of clusters using BIC
+bic_scores = []
+for n_components in n_components_range:
+    gmm = GaussianMixture(n_components=n_components, random_state=42)
+    gmm.fit(embedding)
+    bic = gmm.bic(embedding)
+    bic_scores.append(bic)
+
+# Find the number of components with the lowest BIC
+optimal_n_components = n_components_range[np.argmin(bic_scores)]
+print(f'All sessions: Optimal number of clusters is {optimal_n_components}')
+
+# Fit the GMM with the optimal number of clusters
+optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
+optimal_gmm.fit(embedding)
+labels = optimal_gmm.predict(embedding)
+   
+# Plot the UMAP projections with optimal GMM clusters
+plt.scatter(embedding[:,0], embedding[:,1], c=labels, cmap='viridis', s=5)
+plt.title(f'All Sessions: UMAP projection with GMM ({optimal_n_components} clusters)')
+umap_all_path = os.path.join(umap_dir, 'all_sessions_umap.png')
+plt.savefig(umap_all_path)
+plt.clf()
+
+# Plot BIC values for a range of cluster sizes
+plt.plot(n_components_range, bic_scores, marker='o')
+plt.xlabel('Number of clusters')
+plt.ylabel('BIC')
+plt.title('All Sessions: BIC Scores')
+bic_all_path = os.path.join(umap_dir, 'all_sessions_bic.png')
+plt.savefig(bic_all_path)
+plt.clf()   
+
+# UMAP with GMM on a session-by-session basis
+for session in df.session_ind.unique():
+    # Filter data for the current session
+    mtm_session_bool = mtm_df.session_ind.astype(str).str.contains(str(session))
+    mtm_session_df = mtm_df.loc[mtm_session_bool]
+    mtm_session_features = np.stack(mtm_session_df.features.values)
+    
+    # Scale features
+    scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features)
+    
+    # UMAP embedding
+    embedding = reducer.fit_transform(scaled_mtm_session)
+    
+    # Determine the optimal number of clusters using BIC
+    bic_scores = []
+    for n_components in n_components_range:
+        gmm = GaussianMixture(n_components=n_components, random_state=42)
+        gmm.fit(embedding)
+        bic = gmm.bic(embedding)
+        bic_scores.append(bic)
+    
+    # Find the number of components with the lowest BIC
+    optimal_n_components = n_components_range[np.argmin(bic_scores)]
+    print(f'Session {session}: Optimal number of clusters is {optimal_n_components}')
+    
+    # Fit the GMM with the optimal number of clusters
+    optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
+    optimal_gmm.fit(embedding)
+    labels = optimal_gmm.predict(embedding)
+    
+    # Plot the UMAP projections with optimal GMM clusters
+    plt.scatter(embedding[:, 0], embedding[:, 1], c=labels, cmap='viridis', s=5)
+    plt.title(f'Session {session}: UMAP projection with GMM ({optimal_n_components} clusters)')
+    plt.colorbar(label='GMM Cluster')
+    umap_session_path = os.path.join(umap_dir, f'session_{session}_umap.png')
+    plt.savefig(umap_session_path)
+    plt.clf()
+    
+    # Plot BIC values for a range of cluster sizes
+    plt.plot(n_components_range, bic_scores, marker='o')
+    plt.xlabel('Number of clusters')
+    plt.ylabel('BIC')
+    plt.title(f'Session {session}: BIC Scores')
+    bic_session_path = os.path.join(umap_dir, f'session_{session}_bic.png')
+    plt.savefig(bic_session_path)
+    plt.clf()   
+
+    
+    
+
+    
+    
+    
+    
+    
