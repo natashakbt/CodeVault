@@ -181,7 +181,7 @@ for session in df.session_ind.unique():
 
 ## Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
 # Define jitter amount
-jitter_strength = 0.5  # Adjust the strength of jitter as needed
+jitter_strength = 0.25  # Adjust the strength of jitter as needed
 
 # Add jitter to the session size and optimal clusters
 session_size_jittered = np.array(session_size_list) + np.random.normal(0, jitter_strength, len(session_size_list))
@@ -191,22 +191,31 @@ optimal_cluster_jittered = np.array(optimal_cluster_list) + np.random.normal(0, 
 plt.scatter(session_size_jittered, optimal_cluster_jittered, c='cornflowerblue', marker='o')
 plt.xlabel('Session Size')
 plt.ylabel('Optimal Number of Clusters')
-plt.title('Optimal Cluster Number vs Session Size')
+plt.title(f'Optimal Cluster Number vs Session Size ({iterations} iterations)')
 scatter_plot_path = os.path.join(umap_dir, 'optimal_clusters_vs_session_size.png')
 plt.savefig(scatter_plot_path)
 plt.show()
     
 ## Histogram of ditribution of optimal cluster sizes across all iterations
-plt.hist(optimal_cluster_list, bins=len(n_components_range), color='cornflowerblue', edgecolor='black')
+mode_result = stats.mode(optimal_cluster_list, keepdims=False)
+print(f"The mode is: {mode_result[0]}")
+    
+
+
+plt.hist(optimal_cluster_list, bins=len(n_components_range), 
+         color='cornflowerblue', 
+         edgecolor='black')
+plt.axvline(x=mode_result[0]+0.3, 
+            color='red', 
+            linestyle='--', 
+            linewidth=2)
 plt.xlabel('Optimal Number of Clusters')
 plt.ylabel('Frequency')
-plt.title('Histogram of Optimal Cluster Numbers Across All Iterations')
+plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
 histogram_path = os.path.join(umap_dir, 'optimal_clusters_histogram.png')
 plt.savefig(histogram_path)
 plt.show()
     
-mode_result = stats.mode(optimal_cluster_list, keepdims=False)
-print(f"The mode is: {mode_result[0]}")
-    
+
     
     
