@@ -146,8 +146,8 @@ mtm_df['cluster_num'] = np.nan
 
 # UMAP with GMM on a session-by-session basis
 for session in df.session_ind.unique():
-    if session == 0:
-        continue
+    #if session == 0:
+    #    continue
     for i in range(iterations):
 
         # Filter data for the current session
@@ -168,7 +168,7 @@ for session in df.session_ind.unique():
         
         # Find the number of components with the lowest BIC
         optimal_n_components = n_components_range[np.argmin(bic_scores)]
-        print(f'Session {session}: Optimal number of clusters is {optimal_n_components}')
+        #print(f'Session {session}: Optimal number of clusters is {optimal_n_components}')
         
         # Store the optimal clusters number and the number of MTMs within a session
         optimal_cluster_list.append(optimal_n_components)
@@ -183,8 +183,10 @@ for session in df.session_ind.unique():
 
         # Add cluster number label to df dataframe
         #mtm_session_df = mtm_session_df.reset_index(drop=True)
-        mtm_df.loc[mtm_df.session_ind == session, 'cluster_num'] = labels
-        #df.loc[mtm_session_df.index, 'cluster_num'] = labels
+        #mtm_df.loc[mtm_df.session_ind == session, 'cluster_num'] = labels
+        #df.loc[df.session_ind == session, 'cluster_num'] = labels
+        df.loc[(df.session_ind == session) & (df.event_type == 'MTMs'), 'cluster_num'] = labels
+
         
         # For speed, only create individual session plots for the first iteration
         if i == 0:
@@ -226,8 +228,6 @@ plt.show()
 mode_result = stats.mode(optimal_cluster_list, keepdims=False)
 print(f"The mode is: {mode_result[0]}")
     
-
-
 plt.hist(optimal_cluster_list, bins=len(n_components_range), 
          color='cornflowerblue', 
          edgecolor='black')
@@ -245,7 +245,7 @@ plt.show()
 
 ## Save the new dataframe into a pickle file
 output_file_path = os.path.join(dirname, 'clustering_df_update.pkl')
-mtm_df.to_pickle(output_file_path)
+df.to_pickle(output_file_path)
 
 print(f"DataFrame successfully saved to {output_file_path}")
 
