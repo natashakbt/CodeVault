@@ -21,19 +21,31 @@ from scipy import stats
 # Load data and get setup
 # ==============================================================================
 dirname = '/home/natasha/Desktop/clustering_data/'
-file_path = os.path.join(dirname, 'mtm_clustering_df.pkl')
+#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl')
+file_path = os.path.join(dirname, 'GC_datasets_emg_pred.pkl')
 df = pd.read_pickle(file_path)
+df = df.rename(columns={'pred_event_type': 'event_type'})
+
+
+unique_basenames = df['basename'].unique()
+basename_to_num = {name: idx for idx, name in enumerate(unique_basenames)}
+df['session_ind'] = df['basename'].map(basename_to_num)
+
+
 
 # Make a dataframe of just mouth or tongue movement events
-mtm_bool = df.event_type.str.contains('mouth or tongue movement')
+#mtm_bool = df.event_type.str.contains('mouth or tongue movement')
+mtm_bool = df.event_type.str.contains('MTMs')
 mtm_df_all = df.loc[mtm_bool]
+
 
 # ==============================================================================
 # Remove any bimodal-shaped EMG segments
 # ==============================================================================
 # Test which segments are bimodal using diptest statistic
 p_values = []
-segment_raw = mtm_df_all['baseline_scaled_segments']
+#segment_raw = mtm_df_all['baseline_scaled_segments']
+segment_raw = mtm_df_all['segment_raw']
 for index, segment in enumerate(segment_raw):
     dip, pval = diptest.diptest(segment)
     p_values.append(pval)
@@ -78,7 +90,8 @@ for file in png_files:
     os.remove(file)
 
 # Use the unimodal MTM waveforms for the rest of the analyses
-mtm_df = mtm_df_all[mtm_df_all['p_value'] >= 0.005]
+#mtm_df = mtm_df_all[mtm_df_all['p_value'] >= 0.005]
+mtm_df = mtm_df_all
 # Array of every MTM event and their values for each of the 8 features
 mtm_features = np.stack(mtm_df.features.values)
 
@@ -121,19 +134,25 @@ bic_all_path = os.path.join(umap_dir, 'all_sessions_bic.png')
 plt.savefig(bic_all_path)
 plt.clf()   
 
+
+
 # Initialize lists to save relevant calculated values
 optimal_cluster_list = []
 session_size_list = []
 
-iterations = 20
+iterations = 1 # Number of times to repeat UMAP reduction
+
+mtm_df['cluster_num'] = np.nan
 
 # UMAP with GMM on a session-by-session basis
 for session in df.session_ind.unique():
+    if session == 0:
+        continue
     for i in range(iterations):
 
         # Filter data for the current session
         mtm_session_bool = mtm_df.session_ind.astype(str).str.contains(str(session))
-        mtm_session_df = mtm_df.loc[mtm_session_bool]
+        mtm_session_df = mtm_df.loc[mtm_session_bool].copy() # Make a copy to avoid SettingWithCopyWarning
         mtm_session_features = np.stack(mtm_session_df.features.values)
     
         scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features) # Scale features
@@ -159,6 +178,13 @@ for session in df.session_ind.unique():
         optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
         optimal_gmm.fit(embedding)
         labels = optimal_gmm.predict(embedding)
+        print(len(df.session_ind == session))
+        print(f"Labels length: {len(labels)}, DataFrame length: {len(mtm_session_df)}")
+
+        # Add cluster number label to df dataframe
+        #mtm_session_df = mtm_session_df.reset_index(drop=True)
+        mtm_df.loc[mtm_df.session_ind == session, 'cluster_num'] = labels
+        #df.loc[mtm_session_df.index, 'cluster_num'] = labels
         
         # For speed, only create individual session plots for the first iteration
         if i == 0:
@@ -217,5 +243,10 @@ plt.savefig(histogram_path)
 plt.show()
     
 
-    
+## Save the new dataframe into a pickle file
+output_file_path = os.path.join(dirname, 'clustering_df_update.pkl')
+mtm_df.to_pickle(output_file_path)
+
+print(f"DataFrame successfully saved to {output_file_path}")
+
     
