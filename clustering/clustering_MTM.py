@@ -243,6 +243,14 @@ plt.savefig(histogram_path)
 plt.show()
     
 
+
+# Assign '0' to cluster_num for events where event_type is 'no movement'
+df.loc[df['event_type'] == 'no movement', 'cluster_num'] = 0
+
+# Assign '-1' to cluster_num for events where event_type is 'gape'
+df.loc[df['event_type'] == 'gape', 'cluster_num'] = -1
+
+
 ## Save the new dataframe into a pickle file
 output_file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df.to_pickle(output_file_path)

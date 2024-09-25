@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
+import glob
 
 
 # ==============================================================================
@@ -19,10 +20,15 @@ dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
 
+# No assoicated transition times, so remove this sepcific data:
+df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
+df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
+
+
 transition_file_path = os.path.join(dirname, 'scaled_mode_tau.pkl')
 transition_df = pd.read_pickle(transition_file_path)
 
-window_len = 1000
+window_len = 500
 
 
 # ==============================================================================
@@ -57,7 +63,7 @@ expanded_df = pd.DataFrame({
     'trial_num': trial_num_list,
     'scaled_mode_tau': scaled_mode_tau_list
 })
-
+expanded_df['basename'] = expanded_df['basename'].str.lower()
 
 
 # Create DataFrame that only contains events that are whithin the transition window
@@ -69,8 +75,17 @@ for i in range(len(expanded_df)):
     for index, row in session_df.iterrows():
         segment_bounds = row['segment_bounds']
         trial = row['trial']
-        window_start = expanded_df['scaled_mode_tau'][trial] - window_len
-        window_end = expanded_df['scaled_mode_tau'][trial] + window_len
+        taste = row['taste']
+        basename = row['basename'].lower()
+        transition_time_point = expanded_df.loc[
+            (expanded_df['trial_num'] == trial) & 
+            (expanded_df['taste_num'] == str(taste)) & 
+            (expanded_df['basename'] == basename), 
+            'scaled_mode_tau'
+        ].values[0]
+        window_start = transition_time_point - window_len
+        window_end = transition_time_point + window_len
+        #print(window_start, window_end)
         if window_start <= segment_bounds[0] <= window_end and window_start <= segment_bounds[1] <= window_end:
             rows.append(row)
             
@@ -81,14 +96,20 @@ transition_events_df = pd.DataFrame(rows).reset_index(drop=True)
 # Plot events around the transition, 1 plot per trial
 # ==============================================================================
 # Find unique combinations of trial, taste, and session_ind
-unique_combinations = transition_events_df.groupby(['trial', 'taste', 'session_ind'])
-
+unique_combinations = transition_events_df.groupby(['trial', 'taste', 'basename'])
+expanded_df['basename'] = expanded_df['basename'].str.lower()
 
 emg_dir = os.path.join(dirname, 'EMG_around_transition')
 os.makedirs(emg_dir, exist_ok=True)
 
+# Clear the folder by deleting all files within it
+files = glob.glob(os.path.join(emg_dir, '*'))  # Get list of all files in the directory
+for file in files:
+    os.remove(file)  # Remove each file
+
+#df.loc[(df.session_ind == session) & (df.event_type == 'MTMs'), 'cluster_num'] = labels
 # Iterate over each unique combination of trial, taste, and session_ind
-for (trial, taste, session_ind), group in unique_combinations:
+for (trial, taste, basename), group in unique_combinations:
     plt.figure(figsize=(10, 6))
     
     # Initialize a variable to hold the last point of the previous waveform
@@ -114,31 +135,37 @@ for (trial, taste, session_ind), group in unique_combinations:
         prev_end_time = time_values[-1]
         prev_end_value = segment_raw[-1]
     
-    # Get the transition time for this trial
-    transition_time = expanded_df.loc[expanded_df['trial_num'] == trial, 'scaled_mode_tau'].values[0]
     
+    # Get the transition time for this trial
+    transition_time = expanded_df.loc[
+        (expanded_df['trial_num'] == trial) & 
+        (expanded_df['taste_num'] == str(taste)) & 
+        (expanded_df['basename'] == basename), 
+        'scaled_mode_tau'
+    ].values[0]
+        
     # Add a vertical line at the transition time
     plt.axvline(x=transition_time, color='r', linestyle='--', label='Transition Time')
+        
     
-    
-    plt.title(f"Waveforms for Trial {trial}, Taste {taste}, Session {session_ind}")
+    # Add titles and labels
+    plt.title(f"Waveforms for Trial {trial}, Taste {taste}, {basename}")
     plt.xlabel('Time')
     plt.ylabel('Waveform Amplitude')
     plt.legend()
-    emg_all_path = os.path.join(emg_dir, f'trial{trial}_taste{taste}_session{session_ind}_emg.png')
+    
+    # Save the plot
+    emg_all_path = os.path.join(emg_dir, f'trial{trial}_taste{taste}_{basename}_emg.png')
     plt.savefig(emg_all_path)
-    plt.clf()      
+    plt.clf()
 
-
+'''
 # ==============================================================================
 # Plot events around the transition, 1 plot per trial
 # ==============================================================================
-# Find unique combinations of trial, taste, and session_ind
-unique_combinations = transition_events_df.groupby(['trial', 'taste', 'session_ind'])
 
-
-emg_dir = os.path.join(dirname, 'EMG_around_transition')
-os.makedirs(emg_dir, exist_ok=True)
+cluster_raster_dir = os.path.join(dirname, 'cluster_raster_plots')
+os.makedirs(cluster_raster_dir, exist_ok=True)
 
 # Iterate over each unique combination of trial, taste, and session_ind
 for (trial, taste, session_ind), group in unique_combinations:
@@ -182,4 +209,4 @@ for (trial, taste, session_ind), group in unique_combinations:
     plt.savefig(emg_all_path)
     plt.clf()      
 
-
+'''
