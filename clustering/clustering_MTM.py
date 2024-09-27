@@ -143,6 +143,38 @@ session_size_list = []
 iterations = 1 # Number of times to repeat UMAP reduction
 
 mtm_df['cluster_num'] = np.nan
+'''
+
+for session in df.session_ind.unique():
+    for i in range(iterations):
+        # Filter data for the current session
+        mtm_session_bool = mtm_df.session_ind.astype(str).str.contains(str(session))
+        mtm_session_df = mtm_df.loc[mtm_session_bool].copy()  # Make a copy
+
+        # Use the same fixed number of clusters (3)
+        optimal_n_components = 3
+        print(f'Session {session}: Optimal number of clusters is {optimal_n_components}')
+
+        # Fit the GMM with the fixed number of clusters
+        optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
+        optimal_gmm.fit(embedding)
+        labels = optimal_gmm.predict(embedding)
+
+        # Add cluster number label to df dataframe
+        df.loc[(df.session_ind == session) & (df.event_type == 'MTMs'), 'cluster_num'] = labels
+
+        # For speed, only create individual session plots for the first iteration
+        if i == 0:
+            # Plot the UMAP projections with optimal GMM clusters
+            plt.scatter(embedding[:, 0], embedding[:, 1], c=labels, cmap='viridis', s=5)
+            plt.title(f'Session {session}: UMAP projection with GMM ({optimal_n_components} clusters)')
+            plt.colorbar(label='GMM Cluster')
+            umap_session_path = os.path.join(umap_dir, f'session_{session}_umap.png')
+            plt.savefig(umap_session_path)
+            plt.clf()
+
+'''
+
 
 # UMAP with GMM on a session-by-session basis
 for session in df.session_ind.unique():
@@ -169,7 +201,7 @@ for session in df.session_ind.unique():
         # Find the number of components with the lowest BIC
         optimal_n_components = n_components_range[np.argmin(bic_scores)]
         #print(f'Session {session}: Optimal number of clusters is {optimal_n_components}')
-        
+        optimal_n_components = 3
         # Store the optimal clusters number and the number of MTMs within a session
         optimal_cluster_list.append(optimal_n_components)
         session_size_list.append(len(mtm_session_df))
@@ -245,7 +277,7 @@ plt.show()
 
 
 # Assign '0' to cluster_num for events where event_type is 'no movement'
-df.loc[df['event_type'] == 'no movement', 'cluster_num'] = 0
+df.loc[df['event_type'] == 'no movement', 'cluster_num'] = -2
 
 # Assign '-1' to cluster_num for events where event_type is 'gape'
 df.loc[df['event_type'] == 'gape', 'cluster_num'] = -1

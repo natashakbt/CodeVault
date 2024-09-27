@@ -28,7 +28,7 @@ df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste
 transition_file_path = os.path.join(dirname, 'scaled_mode_tau.pkl')
 transition_df = pd.read_pickle(transition_file_path)
 
-window_len = 500
+window_len = 800
 
 
 # ==============================================================================
@@ -92,6 +92,17 @@ for i in range(len(expanded_df)):
 # Create a DataFrame from the list of rows
 transition_events_df = pd.DataFrame(rows).reset_index(drop=True)
 
+
+# Define a color mapping for cluster numbers
+color_mapping = {
+    -1: '#ff9900',      # Gapes Color for cluster -1
+    -2: '#D3D3D3',      # No mvoement Color for cluster 0
+     0: '#4285F4',     # Color for cluster 1
+     1: '#88498F',    # Color for cluster 2
+     2: '#0CBABA'        # Color for cluster 3
+}
+
+
 # ==============================================================================
 # Plot events around the transition, 1 plot per trial
 # ==============================================================================
@@ -107,26 +118,43 @@ files = glob.glob(os.path.join(emg_dir, '*'))  # Get list of all files in the di
 for file in files:
     os.remove(file)  # Remove each file
 
-#df.loc[(df.session_ind == session) & (df.event_type == 'MTMs'), 'cluster_num'] = labels
-# Iterate over each unique combination of trial, taste, and session_ind
-for (trial, taste, basename), group in unique_combinations:
+# Group by basename (session), taste, and trial
+grouped = transition_events_df.groupby(['basename', 'taste', 'trial'])
+
+for (basename, taste, trial), group in grouped:
     plt.figure(figsize=(10, 6))
     
-    # Initialize a variable to hold the last point of the previous waveform
+    # Initialize variables to hold the last point of the previous waveform
     prev_end_time = None
     prev_end_value = None
     
-    # Iterate through each row within the group
+    # Retrieve the transition time for this trial
+    transition_time = expanded_df.loc[
+        (expanded_df['trial_num'] == trial) & 
+        (expanded_df['taste_num'] == str(taste)) & 
+        (expanded_df['basename'] == basename), 
+        'scaled_mode_tau'
+    ].values[0]
+    
+    # Iterate through each row within the group (each segment)
     for _, row in group.iterrows():
         segment_raw = row['segment_raw']
         segment_bounds = row['segment_bounds']
-        
-        # Create time values using segment_bounds length
-        time_values = np.linspace(segment_bounds[0], segment_bounds[1], len(segment_raw))
+        cluster_num = row['cluster_num']  # Assuming 'cluster_num' is in your dataframe
+
+        # Adjust segment bounds relative to the transition time
+        segment_bounds_adjusted = [segment_bounds[0] - transition_time, segment_bounds[1] - transition_time]
+
+        # Create time values using the adjusted segment bounds
+        time_values = np.linspace(segment_bounds_adjusted[0], segment_bounds_adjusted[1], len(segment_raw))
         
         # Plot the waveform
-        #plt.plot(time_values, segment_raw, label=f"Bounds: {segment_bounds}")
-        plt.plot(time_values, segment_raw)
+        plt.plot(time_values, segment_raw, color='black')
+        
+        # Add transparent overlay based on cluster number
+        color = color_mapping.get(cluster_num, '#FFFFFF')  # Default to white if cluster_num not in mapping
+        plt.fill_between(time_values, segment_raw, segment_raw.min(), color=color, alpha=0.3)  # Adjust alpha for transparency
+        
         # If there's a previous waveform, plot a light gray line connecting the previous end to the current start
         if prev_end_time is not None:
             plt.plot([prev_end_time, time_values[0]], [prev_end_value, segment_raw[0]], color='lightgray')
@@ -135,22 +163,13 @@ for (trial, taste, basename), group in unique_combinations:
         prev_end_time = time_values[-1]
         prev_end_value = segment_raw[-1]
     
-    
-    # Get the transition time for this trial
-    transition_time = expanded_df.loc[
-        (expanded_df['trial_num'] == trial) & 
-        (expanded_df['taste_num'] == str(taste)) & 
-        (expanded_df['basename'] == basename), 
-        'scaled_mode_tau'
-    ].values[0]
-        
-    # Add a vertical line at the transition time
-    plt.axvline(x=transition_time, color='r', linestyle='--', label='Transition Time')
-        
+    # Add a vertical line at the transition time (now at 0 after adjustment)
+    plt.axvline(x=0, color='r', linestyle='--', label='Transition Time')
+    plt.xlim([-(window_len), window_len])  # Set x-axis limits centered around the transition (0 ms)
     
     # Add titles and labels
     plt.title(f"Waveforms for Trial {trial}, Taste {taste}, {basename}")
-    plt.xlabel('Time')
+    plt.xlabel('Time (ms)')
     plt.ylabel('Waveform Amplitude')
     plt.legend()
     
@@ -159,54 +178,141 @@ for (trial, taste, basename), group in unique_combinations:
     plt.savefig(emg_all_path)
     plt.clf()
 
-'''
+
+
+
 # ==============================================================================
 # Plot events around the transition, 1 plot per trial
 # ==============================================================================
 
-cluster_raster_dir = os.path.join(dirname, 'cluster_raster_plots')
-os.makedirs(cluster_raster_dir, exist_ok=True)
+clust_dir = os.path.join(dirname, 'cluster_raster_transition')
+os.makedirs(clust_dir, exist_ok=True)
 
-# Iterate over each unique combination of trial, taste, and session_ind
-for (trial, taste, session_ind), group in unique_combinations:
-    plt.figure(figsize=(10, 6))
-    
-    # Initialize a variable to hold the last point of the previous waveform
-    prev_end_time = None
-    prev_end_value = None
-    
-    # Iterate through each row within the group
-    for _, row in group.iterrows():
-        segment_raw = row['segment_raw']
-        segment_bounds = row['segment_bounds']
-        
-        # Create time values using segment_bounds length
-        time_values = np.linspace(segment_bounds[0], segment_bounds[1], len(segment_raw))
-        
-        # Plot the waveform
-        #plt.plot(time_values, segment_raw, label=f"Bounds: {segment_bounds}")
-        plt.plot(time_values, segment_raw)
-        # If there's a previous waveform, plot a light gray line connecting the previous end to the current start
-        if prev_end_time is not None:
-            plt.plot([prev_end_time, time_values[0]], [prev_end_value, segment_raw[0]], color='lightgray')
-        
-        # Update prev_end_time and prev_end_value to the last time and value of the current waveform
-        prev_end_time = time_values[-1]
-        prev_end_value = segment_raw[-1]
-    
-    # Get the transition time for this trial
-    transition_time = expanded_df.loc[expanded_df['trial_num'] == trial, 'scaled_mode_tau'].values[0]
-    
-    # Add a vertical line at the transition time
-    plt.axvline(x=transition_time, color='r', linestyle='--', label='Transition Time')
-    
-    
-    plt.title(f"Waveforms for Trial {trial}, Taste {taste}, Session {session_ind}")
-    plt.xlabel('Time')
-    plt.ylabel('Waveform Amplitude')
-    plt.legend()
-    emg_all_path = os.path.join(emg_dir, f'trial{trial}_taste{taste}_session{session_ind}_emg.png')
-    plt.savefig(emg_all_path)
-    plt.clf()      
+# Clear the folder by deleting all files within it
+files = glob.glob(os.path.join(clust_dir, '*'))
+for file in files:
+    os.remove(file)  # Remove each file
 
+# Group by basename (session) and taste
+grouped = transition_events_df.groupby(['basename', 'taste'])
+
+
+
+
+# Create a figure
+for basename, taste_group in grouped:
+    taste = basename[1]
+    basename = basename[0]
+    
+    # Create a subplot for each taste
+    num_tastes = len(taste_group['taste'].unique())
+    fig, axs = plt.subplots(nrows=num_tastes, figsize=(8, 10), sharex=True, sharey=True)
+    
+    # Ensure axs is always treated as an iterable
+    if num_tastes == 1:
+        axs = [axs]  # Make axs a list if there's only one subplot
+
+    for ax, (taste, trial_group) in zip(axs, taste_group.groupby('taste')):
+        ax.set_title(f"Taste: {taste}")
+
+        # Collect all cluster_num values for the current taste and trial
+        all_cluster_nums = []
+
+        # Loop through each trial and plot it as a block along time
+        for trial, trial_data in trial_group.groupby('trial'):
+            # Retrieve the transition time from expanded_df
+            transition_time = expanded_df.loc[
+                (expanded_df['trial_num'] == trial) & 
+                (expanded_df['taste_num'] == str(taste)) & 
+                (expanded_df['basename'] == basename), 
+                'scaled_mode_tau'
+            ].values[0]
+
+            for _, row in trial_data.iterrows():
+                # Set the color using the color mapping based on cluster_num
+                cluster_num = row['cluster_num']
+                color = color_mapping.get(cluster_num, 'black')  # Default to 'black' if cluster_num not found
+                
+                # Add cluster_num to the list
+                all_cluster_nums.append(cluster_num)
+
+                # Plot each trial as a block
+                segment_bounds = row['segment_bounds']
+                ax.fill_between([segment_bounds[0] - transition_time, segment_bounds[1] - transition_time], 
+                                trial - 0.5, trial + 0.5, color=color)
+
+            # Set x-axis limits centered around the transition time
+            ax.set_xlim([-(window_len), window_len])  # Set limits from -500 to 500 ms
+            ax.axvline(0, color='k', linestyle='--')  # Add a vertical line at transition time (0 ms)
+
+        ax.set_ylabel(f'Trial {trial}')
+        ax.set_xlabel('Time (ms)')
+
+        # Print the vector of all cluster_num values for this trial group
+        print(f"Trial Group for Taste: {taste}, Basename: {basename}:")
+        print(all_cluster_nums)
+
+    plt.suptitle(f'{basename}')
+    plt.tight_layout()
+    clust_all_path = os.path.join(clust_dir, f'trial{trial}_taste{taste}_{basename}_cluster_raster.png')
+    plt.savefig(clust_all_path)
+    plt.clf()
+
+
+
+
+
+
+
+
+
+
+'''
+# Works if clusternum is not set
+# Create a figure
+for basename, taste_group in grouped:
+    taste = basename[1]
+    basename = basename[0]
+    
+    # Create a subplot for each taste
+    num_tastes = len(taste_group['taste'].unique())
+    fig, axs = plt.subplots(nrows=num_tastes, figsize=(8, 10), sharex=True, sharey=True)
+    
+    # Ensure axs is always treated as an iterable
+    if num_tastes == 1:
+        axs = [axs]  # Make axs a list if there's only one subplot
+
+    for ax, (taste, trial_group) in zip(axs, taste_group.groupby('taste')):
+        ax.set_title(f"Taste: {taste}")
+
+        # Loop through each trial and plot it as a block along time
+        for trial, trial_data in trial_group.groupby('trial'):
+            # Retrieve the transition time from expanded_df
+            transition_time = expanded_df.loc[
+                (expanded_df['trial_num'] == trial) & 
+                (expanded_df['taste_num'] == str(taste)) & 
+                (expanded_df['basename'] == basename), 
+                'scaled_mode_tau'
+            ].values[0]
+
+            for _, row in trial_data.iterrows():
+                # Set the color by cluster_num
+                cluster_num = row['cluster_num']
+                color = plt.cm.viridis(cluster_num / transition_events_df['cluster_num'].max())  # Normalize by max cluster_num
+                
+                # Plot each trial as a block
+                segment_bounds = row['segment_bounds']
+                ax.fill_between([segment_bounds[0] - transition_time, segment_bounds[1] - transition_time], 
+                                trial - 0.5, trial + 0.5, color=color)
+
+            # Set x-axis limits centered around the transition time
+            ax.set_xlim([-500, 500])  # Set limits from -500 to 500 ms
+            ax.axvline(0, color='k', linestyle='--')  # Add a vertical line at transition time (0 ms)
+
+        ax.set_ylabel(f'Trial {trial}')
+        ax.set_xlabel('Time (ms)')
+
+    plt.suptitle(f'{basename}')
+    plt.tight_layout()
+    plt.show()
 '''
