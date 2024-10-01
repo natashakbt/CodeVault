@@ -22,7 +22,7 @@ from scipy import stats
 # ==============================================================================
 dirname = '/home/natasha/Desktop/clustering_data/'
 #file_path = os.path.join(dirname, 'mtm_clustering_df.pkl')
-file_path = os.path.join(dirname, 'GC_datasets_emg_pred.pkl')
+file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl')
 df = pd.read_pickle(file_path)
 df = df.rename(columns={'pred_event_type': 'event_type'})
 
@@ -38,7 +38,7 @@ df['session_ind'] = df['basename'].map(basename_to_num)
 mtm_bool = df.event_type.str.contains('MTMs')
 mtm_df_all = df.loc[mtm_bool]
 
-
+'''
 # ==============================================================================
 # Remove any bimodal-shaped EMG segments
 # ==============================================================================
@@ -74,7 +74,7 @@ for index, row in mtm_df_multi.iterrows():
 
 percent_multi = len(mtm_df_multi)/len(mtm_df_all)*100
 print(f'Percent of multimodal waveforms of total: {percent_multi:.2f}%')
-
+'''
 
 # ==============================================================================
 # Create UMAP projection of all MTM events and by session. 
@@ -183,7 +183,8 @@ for session in df.session_ind.unique():
     for i in range(iterations):
 
         # Filter data for the current session
-        mtm_session_bool = mtm_df.session_ind.astype(str).str.contains(str(session))
+        # mtm_session_bool = mtm_df.session_ind.astype(str).str.contains(str(session))
+        mtm_session_bool = mtm_df.session_ind == session
         mtm_session_df = mtm_df.loc[mtm_session_bool].copy() # Make a copy to avoid SettingWithCopyWarning
         mtm_session_features = np.stack(mtm_session_df.features.values)
     

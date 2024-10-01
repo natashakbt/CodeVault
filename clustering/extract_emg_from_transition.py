@@ -20,16 +20,19 @@ dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
 
-# No assoicated transition times, so remove this sepcific data:
-df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
-df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
-
-
 transition_file_path = os.path.join(dirname, 'scaled_mode_tau.pkl')
 transition_df = pd.read_pickle(transition_file_path)
 
-window_len = 800
+# Remove any data for df that does not have an associated transition time in scaled_mode_tau
+df['basename'] = df['basename'].str.lower() # All basenames to lowercase
+transition_df['basename'] = transition_df['basename'].str.lower() # All basenames to lowercase
+tau_basenames = transition_df.basename.unique() # Find all basenames in transition_df
+df = df.loc[df['basename'].isin(tau_basenames)] # Keep only basenames 
+# Manually removed this sepcific data:
+df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
+df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
 
+window_len = 800
 
 # ==============================================================================
 # Re-structure transition dataframe
@@ -108,7 +111,6 @@ color_mapping = {
 # ==============================================================================
 # Find unique combinations of trial, taste, and session_ind
 unique_combinations = transition_events_df.groupby(['trial', 'taste', 'basename'])
-expanded_df['basename'] = expanded_df['basename'].str.lower()
 
 emg_dir = os.path.join(dirname, 'EMG_around_transition')
 os.makedirs(emg_dir, exist_ok=True)
@@ -118,10 +120,22 @@ files = glob.glob(os.path.join(emg_dir, '*'))  # Get list of all files in the di
 for file in files:
     os.remove(file)  # Remove each file
 
+# =============================================================================
+#transition_events_df['event_type'] = transition_events_df['event_type'].astype('category')
+#transition_events_df['pred_event_code'] = transition_events_df.event_type.cat.codes
+#unique_event_codes = transition_events_df.pred_event_code.unique()
+
+#cmap = plt.cm.get_cmap('tab10')
+# =============================================================================
+
 # Group by basename (session), taste, and trial
 grouped = transition_events_df.groupby(['basename', 'taste', 'trial'])
 
+
 for (basename, taste, trial), group in grouped:
+    basename_dir = os.path.join(emg_dir, basename)
+    os.makedirs(basename_dir, exist_ok=True)  # Ensure the folder is created
+ 
     plt.figure(figsize=(10, 6))
     
     # Initialize variables to hold the last point of the previous waveform
@@ -140,7 +154,7 @@ for (basename, taste, trial), group in grouped:
     for _, row in group.iterrows():
         segment_raw = row['segment_raw']
         segment_bounds = row['segment_bounds']
-        cluster_num = row['cluster_num']  # Assuming 'cluster_num' is in your dataframe
+        cluster_num = row['cluster_num']
 
         # Adjust segment bounds relative to the transition time
         segment_bounds_adjusted = [segment_bounds[0] - transition_time, segment_bounds[1] - transition_time]
@@ -174,11 +188,12 @@ for (basename, taste, trial), group in grouped:
     plt.legend()
     
     # Save the plot
-    emg_all_path = os.path.join(emg_dir, f'trial{trial}_taste{taste}_{basename}_emg.png')
+    #emg_all_path = os.path.join(emg_dir, f'trial{trial}_taste{taste}_{basename}_emg.png')
+    #plt.savefig(emg_all_path)
+    #plt.clf()
+    emg_all_path = os.path.join(basename_dir, f'trial{trial}_taste{taste}_{basename}_emg.png')
     plt.savefig(emg_all_path)
     plt.clf()
-
-
 
 
 # ==============================================================================
@@ -198,7 +213,6 @@ grouped = transition_events_df.groupby(['basename', 'taste'])
 
 
 
-
 # Create a figure
 for basename, taste_group in grouped:
     taste = basename[1]
@@ -209,6 +223,7 @@ for basename, taste_group in grouped:
     fig, axs = plt.subplots(nrows=num_tastes, figsize=(8, 10), sharex=True, sharey=True)
     
     # Ensure axs is always treated as an iterable
+    # TODO This probably needs to be fixed if I want to do suplots for each taste on one graph
     if num_tastes == 1:
         axs = [axs]  # Make axs a list if there's only one subplot
 
@@ -259,6 +274,9 @@ for basename, taste_group in grouped:
     plt.clf()
 
 
+# ==============================================================================
+# Plot events around the transition, 1 plot per trial
+# ==============================================================================
 
 
 
@@ -268,7 +286,7 @@ for basename, taste_group in grouped:
 
 
 '''
-# Works if clusternum is not set
+# Works if there is not a set of numbers in cluster_num
 # Create a figure
 for basename, taste_group in grouped:
     taste = basename[1]
