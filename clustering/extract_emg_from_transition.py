@@ -11,7 +11,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import glob
-
+from scipy.stats import chi2_contingency
 
 # ==============================================================================
 # Load data and get setup
@@ -33,6 +33,22 @@ df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
 
 window_len = 800
+
+
+
+def assign_pal_taste(row):
+    # Map taste_name to 1, 0, or -1 based on conditions
+    if row['taste_name'] in ['nacl', 'water', 'suc']:
+        return 1
+    elif row['taste_name'] in ['ca', 'qhcl']:
+        return 0
+    else:
+        print(f"Unknown palatability of taste: {row['taste_name']}")
+        return -1
+
+
+
+
 
 # ==============================================================================
 # Re-structure transition dataframe
@@ -208,11 +224,163 @@ files = glob.glob(os.path.join(clust_dir, '*'))
 for file in files:
     os.remove(file)  # Remove each file
 
+
+# Initialize an empty list to store the rows for the final dictionary
+summary_data = []
+
+
 # Group by basename (session) and taste
 grouped = transition_events_df.groupby(['basename', 'taste'])
 
+# Create a figure and populate the dictionary
+for basename, taste_group in grouped:
+    taste = basename[1]
+    basename = basename[0]
+    
+    # Create a subplot for each taste
+    num_tastes = len(taste_group['taste'].unique())
+    fig, axs = plt.subplots(nrows=num_tastes, figsize=(8, 10), sharex=True, sharey=True)
+    
+    # Ensure axs is always treated as an iterable
+    if num_tastes == 1:
+        axs = [axs]  # Make axs a list if there's only one subplot
+
+    for ax, (taste, trial_group) in zip(axs, taste_group.groupby('taste')):
+        ax.set_title(f"Taste: {taste}")
+
+        # Collect all cluster_num values for the current taste and trial
+        all_cluster_nums = []
+
+        # Loop through each trial and plot it as a block along time
+        for trial, trial_data in trial_group.groupby('trial'):
+            # Retrieve the transition time from expanded_df
+            transition_time = expanded_df.loc[
+                (expanded_df['trial_num'] == trial) & 
+                (expanded_df['taste_num'] == str(taste)) & 
+                (expanded_df['basename'] == basename), 
+                'scaled_mode_tau'
+            ].values[0]
+
+            # Dictionary to store before/after counts for this trial
+            trial_summary = {}
+
+            for _, row in trial_data.iterrows():
+                # Set the color using the color mapping based on cluster_num
+                cluster_num = row['cluster_num']
+                color = color_mapping.get(cluster_num, 'black')  # Default to 'black' if cluster_num not found
+                
+                # Add cluster_num to the list
+                all_cluster_nums.append(cluster_num)
+
+                # Plot each trial as a block
+                segment_bounds = row['segment_bounds']
+                ax.fill_between([segment_bounds[0] - transition_time, segment_bounds[1] - transition_time], 
+                                trial - 0.5, trial + 0.5, color=color)
+                
+                # Check if the event occurred before or after the transition
+                event_position = "before" if segment_bounds[1] < transition_time else "after"
+
+                # Add to the summary_data list
+                summary_data.append({
+                    'basename': basename,
+                    'taste': taste,
+                    'cluster_num': cluster_num,
+                    'event_position': event_position
+                })
+
+            # Set x-axis limits centered around the transition time
+            ax.set_xlim([-(window_len), window_len])  # Set limits from -500 to 500 ms
+            ax.axvline(0, color='k', linestyle='--')  # Add a vertical line at transition time (0 ms)
+
+        ax.set_ylabel(f'Trial {trial}')
+        ax.set_xlabel('Time (ms)')
+
+        # Print the vector of all cluster_num values for this trial group
+        print(f"Trial Group for Taste: {taste}, Basename: {basename}:")
+
+    plt.suptitle(f'{basename}')
+    plt.tight_layout()
+    clust_all_path = os.path.join(clust_dir, f'trial{trial}_taste{taste}_{basename}_cluster_raster.png')
+    plt.savefig(clust_all_path)
+    plt.clf()
 
 
+# ==============================================================================
+# Chi-squared test
+# ==============================================================================
+
+# Convert the summary data to a DataFrame
+summary_df = pd.DataFrame(summary_data)
+
+# Pivot the DataFrame to create the before/after summary
+summary_pivot = summary_df.groupby(['basename', 'taste', 'cluster_num', 'event_position']).size().unstack(fill_value=0)
+
+# Reset index to make the DataFrame easier to read
+summary_pivot.reset_index(inplace=True)
+
+
+# Add the taste_name by merging with the transition_events_df on basename and taste
+# First, create a subset of transition_events_df with only unique (basename, taste) pairs and their taste_name
+taste_name_lookup = transition_events_df[['basename', 'taste', 'taste_name']].drop_duplicates()
+
+# Now merge the summary_pivot with this taste_name_lookup DataFrame to add the 'taste_name' column
+summary_pivot = pd.merge(summary_pivot, taste_name_lookup, how='left', on=['basename', 'taste'])
+
+
+# Apply the function to create the 'pal_taste' column
+summary_pivot['pal_taste'] = summary_pivot.apply(assign_pal_taste, axis=1)
+
+
+summary_pivot.drop(columns=['taste'], inplace=True)
+
+collapsed_summary = summary_pivot.groupby(['basename', 'cluster_num', 'pal_taste'], as_index=False).sum()
+
+
+
+
+# Create a pivot table to ensure 'before' and 'after' values are aligned by 'cluster_num'
+pivoted_df = collapsed_summary.pivot(index=['basename', 'pal_taste'], columns='cluster_num', values=['before', 'after']).fillna(0)
+
+# Initialize a list to store the results of the chi-squared tests
+chi_squared_results = []
+
+# Iterate through unique combinations of basename and pal_taste
+for (basename, pal_taste), group in pivoted_df.groupby(level=['basename', 'pal_taste']):
+    # Extract the 'before' and 'after' vectors, ensuring they are in the same order
+    before_vector = group['before'].values.flatten()
+    after_vector = group['after'].values.flatten()
+    print(f'before: {before_vector}')
+    print(f'after: {after_vector}')
+    # Perform the Chi-squared test
+    chi2_stat, p_value, _, _ = chi2_contingency([before_vector, after_vector])
+
+    # Store the results
+    chi_squared_results.append({
+        'basename': basename,
+        'pal_taste': pal_taste,
+        'chi2_stat': chi2_stat,
+        'p_value': p_value
+    })
+
+# Convert the results to a DataFrame
+chi_squared_results_df = pd.DataFrame(chi_squared_results)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+'''
+# THIS WORKS - commenting away for now
 # Create a figure
 for basename, taste_group in grouped:
     taste = basename[1]
@@ -275,12 +443,12 @@ for basename, taste_group in grouped:
 
 
 # ==============================================================================
-# Plot events around the transition, 1 plot per trial
+# Chi-Squared test for frequency of behaviors
 # ==============================================================================
 
 
 
-
+'''
 
 
 
