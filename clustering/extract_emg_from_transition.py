@@ -194,7 +194,7 @@ for (basename, taste, trial), group in grouped:
         prev_end_value = segment_raw[-1]
     
     # Add a vertical line at the transition time (now at 0 after adjustment)
-    plt.axvline(x=0, color='r', linestyle='--', label='Transition Time')
+    #plt.axvline(x=0, color='k', linestyle='--', label='Transition Time')
     plt.xlim([-(window_len), window_len])  # Set x-axis limits centered around the transition (0 ms)
     
     # Add titles and labels
@@ -365,15 +365,43 @@ for (basename, pal_taste), group in pivoted_df.groupby(level=['basename', 'pal_t
 # Convert the results to a DataFrame
 chi_squared_results_df = pd.DataFrame(chi_squared_results)
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+from matplotlib.ticker import ScalarFormatter
+import matplotlib.pyplot as plt
+import seaborn as sns
+import matplotlib.ticker as ticker
 
 
+import matplotlib.pyplot as plt
+import seaborn as sns
 
+# Create the scatter plot
+plt.figure(figsize=(6, 8))
 
+# Add a horizontal line at p = 0.05
+plt.axhline(y=0.05, color='k', linestyle='--')
 
+# Plot the scatter plot with larger dots (using 's' parameter)
+sns.scatterplot(x='pal_taste', y='p_value', data=chi_squared_results_df, s=200)  # 's' controls dot size
 
+# Set the y-axis to log scale
+plt.yscale('log')
 
+# Customize x-axis ticks to show only 0 and 1
+plt.xticks([0, 1])
 
+# Add labels and title
+plt.xlabel('Pal Taste (0 or 1)')
+plt.ylabel('p-value')
+plt.title('P-Values vs. Pal Taste (Logarithmic Y-Scale)')
 
+# Set x-axis limits
+plt.xlim([-1, 2])
+
+# Show plot
+plt.show()
 
 
 
