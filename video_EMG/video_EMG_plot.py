@@ -14,6 +14,8 @@ import os
 import matplotlib.pyplot as plt
 import pandas as pd
 import json
+from matplotlib.animation import FuncAnimation, FFMpegWriter
+
 
 '''===================================================================='''
 '''INPUT BASE FOLER, RAT NAME and TEST DAY NUM HERE'''
@@ -22,8 +24,8 @@ base_folder = '/media/natasha/drive2/Natasha_Data' #contains folders of all rats
 
 rat_name = 'NB34'
 test_day = 3
-trial = 64 #trial num out of 120 with first trial =1
-scorer = 'YW'
+trial = 11 #trial num out of 120 with first trial =1
+scorer = 'NBT'
 '''===================================================================='''
 
 
@@ -181,6 +183,7 @@ fig, (ax1, ax2) = plt.subplots(2, 1,
 
 ### Subplot 1 stuff (behavior)
 # Set the y-axis ticks and labels
+#behavior_names = ['MTM', 'LTM', 'Gape'] # Force it to be correct
 ax1.set_yticks(range(len(behavior_names)))
 ax1.set_yticklabels(behavior_names)
 
@@ -247,7 +250,153 @@ plt.show()
 
 
 
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, FFMpegWriter
 
+# Create a single plot area
+fig, ax1 = plt.subplots(figsize=(10, 4))  # Adjust the figsize as needed
+
+# Plotting parameters (e.g., bar width, custom colors)
+bar_linewidth = 25
+custom_colors = ['#3B75AF', '#AFC7E8', '#EF8636'] # Add colors as needed
+tick_positions = [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500]
+tick_labels = ['-0.5', '0', '0.5', '1', '1.5', '2', '2.5', '3', '3.5', '4', '4.5', '5']
+
+# Update function to animate the behavior plot
+def update(frame):
+    # Clear the axis for each frame
+    ax1.clear()
+
+    # Current frame time for plotting up to that point
+    current_time = frame * (trial_post_stim / 110)  # Adjust based on frame count
+
+    # Plot behavior data up to the current time
+    for i, intervals in enumerate(time_intervals):
+        if intervals is not None:
+            for interval in intervals:
+                start_time, end_time = interval
+                if start_time <= current_time:
+                    ax1.hlines(i, start_time, min(end_time, current_time),
+                               linewidth=bar_linewidth, color=custom_colors[i % len(custom_colors)])
+    
+    # Redraw trial delivery line
+    ax1.axvline(trial_pre_stim, linestyle='--', color='gray')  
+    behavior_names = ['MTM', 'LTM', 'Gape']
+    # Set titles and labels
+    #ax1.set_title(f'{rat_name}, Test Day {test_day} Trial {trial}: delivery#{emg_trial}')
+    ax1.set_ylim(-0.5, len(behavior_names) - 0.1)
+    ax1.set_xlabel('Time (s)')
+    ax1.set_yticks(range(len(behavior_names)))
+    ax1.set_yticklabels(behavior_names)
+    ax1.set_xticks(tick_positions)
+    ax1.set_xticklabels(tick_labels)
+
+# Create and save the animation
+ani = FuncAnimation(fig, update, frames=110, repeat=False)
+writer = FFMpegWriter(fps=20, metadata=dict(artist='Natasha'), bitrate=1800)
+ani.save('behavior_animation.mp4', writer=writer)
+
+
+
+'''
+
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, FFMpegWriter
+
+# Create a single plot area
+fig, ax1 = plt.subplots(figsize=(10, 4))  # Adjust the figsize as needed
+
+# Plotting parameters (e.g., bar width, custom colors)
+bar_linewidth = 25
+custom_colors = ['#4B9CD3', '#FF6347', '#90EE90']  # Add colors as needed
+tick_positions = [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500]
+tick_labels = ['-0.5', '0', '0.5', '1', '1.5', '2', '2.5', '3', '3.5', '4', '4.5', '5']
+
+# Update function to animate the behavior plot
+def update(frame):
+    # Clear the axis for each frame
+    ax1.clear()
+
+    # Current frame time for plotting up to that point
+    current_time = frame * (trial_post_stim / 100)  # Adjust based on frame count
+
+    # Plot behavior data up to the current time
+    for i, intervals in enumerate(time_intervals):
+        if intervals is not None:
+            for interval in intervals:
+                start_time, end_time = interval
+                if start_time <= current_time:
+                    ax1.hlines(i, start_time, min(end_time, current_time),
+                               linewidth=bar_linewidth, color=custom_colors[i % len(custom_colors)])
+    
+    # Redraw trial delivery line
+    ax1.axvline(trial_pre_stim, linestyle='--', color='gray')  
+
+    # Set titles and labels
+    ax1.set_title(f'{rat_name}, Test Day {test_day} Trial {trial}: delivery#{emg_trial}')
+    ax1.set_ylim(-0.5, len(behavior_names) - 0.1)
+    ax1.set_xlabel('Time (s)')
+    ax1.set_yticks(range(len(behavior_names)))
+    ax1.set_yticklabels(behavior_names)
+
+    # Set the x-axis limits, ticks, and labels as you defined
+    ax1.set_xlim(0, trial_pre_stim + trial_post_stim)
+    ax1.set_xticks(tick_positions)
+    ax1.set_xticklabels(tick_labels)
+
+# Create and save the animation
+ani = FuncAnimation(fig, update, frames=100, repeat=False)
+writer = FFMpegWriter(fps=20, metadata=dict(artist='Natasha'), bitrate=1800)
+ani.save('behavior_animation.mp4', writer=writer)
+
+
+
+
+def update(frame):
+    # Clear the axis for each frame
+    ax1.clear()
+    ax2.clear()
+    
+    # Plot up to the current frame
+    current_time = frame * (trial_post_stim / 100)  # Adjust based on frame count
+    
+    # Plot behavior data up to the current time
+    for i, intervals in enumerate(time_intervals):
+        if intervals is not None:
+            for interval in intervals:
+                start_time, end_time = interval
+                if start_time <= current_time:
+                    ax1.hlines(i, start_time, min(end_time, current_time),
+                               linewidth=bar_linewidth, color=custom_colors[i % len(custom_colors)])
+    
+    # Plot EMG data up to the current time
+    #ax2.plot(emg_ad_env[emg_taste, emg_trial, :frame], color='0.4')
+    
+    # Redraw trial delivery line
+    ax1.axvline(trial_pre_stim, linestyle='--', color='gray')  
+    ax2.axvline(trial_pre_stim, linestyle='--', color='gray')
+
+    # Set titles and labels
+    ax1.set_title(f'{rat_name}, Test Day {test_day} Trial {trial}: delivery#{emg_trial}')
+    ax1.set_ylim(-0.5, len(behavior_names) - 0.1)
+    ax2.set_xlabel('Time (s)')
+    ax2.set_ylabel('EMG signal envelope (mV)')
+    
+    # Keep y-axis labels and x-ticks for context
+    ax1.set_yticks(range(len(behavior_names)))
+    ax1.set_yticklabels(behavior_names)
+    ax2.set_xticks(tick_positions)
+    ax2.set_xticklabels(tick_labels)
+    
+# Create the animation object
+ani = FuncAnimation(fig, update, frames=100, repeat=False)
+
+# Save the animation as an MP4 file
+writer = FFMpegWriter(fps=20, metadata=dict(artist='Natasha'), bitrate=1800)
+ani.save('behavior_emg_animation.mp4', writer=writer)
+
+
+'''
 
 
 '''

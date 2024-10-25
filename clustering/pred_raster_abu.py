@@ -72,8 +72,8 @@ event_color_map = {
         }
 inv_bsa_event_map = {v: k for k, v in bsa_event_map.items()}
 
-#predicted_df = pd.read_pickle(os.path.join(artifact_dir, 'all_datasets_emg_pred.pkl'))
-predicted_df = pd.read_pickle(os.path.join(artifact_dir, 'clustering_df_update.pkl'))
+predicted_df = pd.read_pickle(os.path.join(artifact_dir, 'all_datasets_emg_pred.pkl'))
+#predicted_df = pd.read_pickle(os.path.join(artifact_dir, 'clustering_df_update.pkl'))
 predicted_df.reset_index(inplace=True)
 predicted_df['xgb_pred_code'] = predicted_df['pred_event_type'].map(inv_bsa_event_map)
 # feature_names = open(os.path.join(artifact_dir, 'all_datasets_feature_names.txt')).read().split('\n') 
@@ -204,6 +204,7 @@ for session_name, session_frame in list(pred_frame.groupby('session_name')):
                     this_xgb_pred[taste],
                       cmap=cmap,vmin=0,vmax=2,)
             ax[taste].set_ylabel(f'{this_tastes[taste]}' + '\nTrial #')
+            ax[taste].set_xlim(1000, 5000)
         except:
             print(f'{session_name} {taste} ind not found')
     ax[0].set_title('XGB')

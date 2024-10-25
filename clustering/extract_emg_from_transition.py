@@ -12,6 +12,10 @@ import os
 import matplotlib.pyplot as plt
 import glob
 from scipy.stats import chi2_contingency
+import seaborn as sns
+from matplotlib.legend_handler import HandlerTuple
+
+
 
 # ==============================================================================
 # Load data and get setup
@@ -308,16 +312,12 @@ for basename, taste_group in grouped:
 # ==============================================================================
 # Chi-squared test
 # ==============================================================================
-
 # Convert the summary data to a DataFrame
 summary_df = pd.DataFrame(summary_data)
-
 # Pivot the DataFrame to create the before/after summary
 summary_pivot = summary_df.groupby(['basename', 'taste', 'cluster_num', 'event_position']).size().unstack(fill_value=0)
-
 # Reset index to make the DataFrame easier to read
 summary_pivot.reset_index(inplace=True)
-
 
 # Add the taste_name by merging with the transition_events_df on basename and taste
 # First, create a subset of transition_events_df with only unique (basename, taste) pairs and their taste_name
@@ -325,18 +325,11 @@ taste_name_lookup = transition_events_df[['basename', 'taste', 'taste_name']].dr
 
 # Now merge the summary_pivot with this taste_name_lookup DataFrame to add the 'taste_name' column
 summary_pivot = pd.merge(summary_pivot, taste_name_lookup, how='left', on=['basename', 'taste'])
-
-
 # Apply the function to create the 'pal_taste' column
 summary_pivot['pal_taste'] = summary_pivot.apply(assign_pal_taste, axis=1)
-
-
 summary_pivot.drop(columns=['taste'], inplace=True)
 
 collapsed_summary = summary_pivot.groupby(['basename', 'cluster_num', 'pal_taste'], as_index=False).sum()
-
-
-
 
 # Create a pivot table to ensure 'before' and 'after' values are aligned by 'cluster_num'
 pivoted_df = collapsed_summary.pivot(index=['basename', 'pal_taste'], columns='cluster_num', values=['before', 'after']).fillna(0)
@@ -365,28 +358,39 @@ for (basename, pal_taste), group in pivoted_df.groupby(level=['basename', 'pal_t
 # Convert the results to a DataFrame
 chi_squared_results_df = pd.DataFrame(chi_squared_results)
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
-from matplotlib.ticker import ScalarFormatter
-import matplotlib.pyplot as plt
-import seaborn as sns
-import matplotlib.ticker as ticker
-
-
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-# Create the scatter plot
+# ==============================================================================
+# Plotting Chi-Squared test and bar graph of behavior frequency before/after 
+# ==============================================================================
+# Create the scatter plot for the chi-squared p-values
 plt.figure(figsize=(6, 8))
-
-# Add a horizontal line at p = 0.05
-plt.axhline(y=0.05, color='k', linestyle='--')
-
-# Plot the scatter plot with larger dots (using 's' parameter)
+plt.axhline(y=0.05, color='k', linestyle='--') # Add a horizontal line at p = 0.05
 sns.scatterplot(x='pal_taste', y='p_value', data=chi_squared_results_df, s=200)  # 's' controls dot size
 
-# Set the y-axis to log scale
+plt.yscale('log') # Set the y-axis to log scale
+
+plt.xticks([0, 1]) # Customize x-axis ticks to show only 0 and 1
+
+# Add labels and title
+plt.xlabel('Pal Taste (0 or 1)')
+plt.ylabel('p-value')
+plt.title('P-Values vs. Pal Taste (Logarithmic Y-Scale)')
+
+plt.xlim([-1, 2]) # Set x-axis limits
+
+plt.show()
+
+
+
+
+# Color indicates basename
+# Plotting Chi-Squared test and bar graph of behavior frequency before/after 
+plt.figure(figsize=(6, 8))
+plt.axhline(y=0.05, color='k', linestyle='--')  # Add a horizontal line at p = 0.05
+
+# Scatter plot for the p-values, using 'basename' as the hue to color-code
+sns.scatterplot(x='pal_taste', y='p_value', hue='basename', data=chi_squared_results_df, s=400, palette='Set1', legend=False)
+
+# Set y-axis to log scale
 plt.yscale('log')
 
 # Customize x-axis ticks to show only 0 and 1
@@ -400,11 +404,168 @@ plt.title('P-Values vs. Pal Taste (Logarithmic Y-Scale)')
 # Set x-axis limits
 plt.xlim([-1, 2])
 
-# Show plot
+# Move the legend outside the plot for better visualization if there are many unique basenames
+#plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', title='Basename')
+
 plt.show()
 
 
 
+
+
+
+
+'''
+# Lines Between Basename
+# Plotting Chi-Squared test and bar graph of behavior frequency before/after 
+plt.figure(figsize=(6, 8))
+plt.axhline(y=0.05, color='k', linestyle='--')  # Add a horizontal line at p = 0.05
+
+# Scatter plot for the p-values
+sns.scatterplot(x='pal_taste', y='p_value', data=chi_squared_results_df, s=200)
+
+# Add lines between points with the same basename
+for basename in chi_squared_results_df['basename'].unique():
+    # Filter the data for the current basename
+    subset = chi_squared_results_df[chi_squared_results_df['basename'] == basename]
+    
+    # Check if there are data points for both 0 and 1 pal_taste
+    if subset['pal_taste'].nunique() == 2:
+        # Sort by pal_taste to ensure proper connection between 0 and 1
+        subset = subset.sort_values(by='pal_taste')
+        plt.plot(subset['pal_taste'], subset['p_value'], color='grey', linestyle='-', linewidth=1)
+
+# Set y-axis to log scale
+plt.yscale('log')
+
+# Customize x-axis ticks to show only 0 and 1
+plt.xticks([0, 1])
+
+# Add labels and title
+plt.xlabel('Pal Taste (0 or 1)')
+plt.ylabel('p-value')
+plt.title('P-Values vs. Pal Taste (Logarithmic Y-Scale)')
+
+# Set x-axis limits
+plt.xlim([-1, 2])
+
+plt.show()
+
+'''
+
+
+
+
+
+
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Loop through each unique combination of 'basename' and 'pal_taste'
+for (basename, pal_taste), group_data in summary_pivot.groupby(['basename', 'pal_taste']):
+    # Set up the figure
+    plt.figure(figsize=(8, 6))
+
+    # Melt the data to plot 'before' and 'after' as separate bars
+    melted_data = group_data.melt(id_vars=['cluster_num'], value_vars=['before', 'after'], 
+                                  var_name='Time', value_name='Count')
+
+    # Create the bar plot without error bars
+    sns.barplot(x='cluster_num', y='Count', hue='Time', data=melted_data, palette='Paired', errorbar=None)
+
+    # Customize the plot
+    plt.title(f'{basename}, Pal Taste {pal_taste}')
+    plt.xlabel('Cluster Number')
+    plt.ylabel('Count')
+    plt.legend(title='Time')
+    
+    # Show or save the plot as needed
+    plt.show()
+
+
+
+
+
+
+palette = sns.color_palette("Paired")
+
+# Create a mapping for cluster_num to specific colors
+color_mapping = {
+    -2: palette[0:2],  # Light blue and dark blue for cluster_num -2
+    -1: palette[2:4],  # Light green and dark green for cluster_num -1
+    0: palette[4:6],   # Next pair for cluster_num 0
+    1: palette[6:8],   # Next pair for cluster_num 1
+    2: palette[8:10],  # Next pair for cluster_num 2
+}
+
+
+# Loop through each unique combination of 'basename' and 'pal_taste'
+for (basename, pal_taste), group_data in summary_pivot.groupby(['basename', 'pal_taste']):
+    # Set up the figure
+    plt.figure(figsize=(8, 6))
+
+    # Melt the data to plot 'before' and 'after' as separate bars
+    melted_data = group_data.melt(id_vars=['cluster_num'], value_vars=['before', 'after'], 
+                                  var_name='Time', value_name='Count')
+
+    # Create the bar plot without error bars
+    sns.barplot(x='cluster_num', y='Count', hue='Time', data=melted_data, palette=color_mapping[cluster_num], errorbar=None)
+
+    # Customize the plot
+    plt.title(f'{basename}, Pal Taste {pal_taste}')
+    plt.xlabel('Cluster Number')
+    plt.ylabel('Count')
+    plt.legend(title='Time')
+    
+    # Show or save the plot as needed
+    plt.show()
+    
+    
+import matplotlib.pyplot as plt
+
+palette = ['#D3D3D3',
+ '#8d8d8d',
+ '#fdbf6f',
+ '#ff7f00',
+ '#a6cee3',
+ '#5383EC',
+ '#cab2d6',
+ '#6a3d9a',
+ '#c5e7e7',
+ '#55B7B9']
+
+
+
+
+
+
+
+for (basename, pal_taste), group_data in summary_pivot.groupby(['basename', 'pal_taste']):
+    
+    melted_data = group_data.melt(id_vars=['cluster_num'], value_vars=['before', 'after'], 
+                                  var_name='Time', value_name='Count')
+    
+    ax = sns.barplot(data=melted_data, x='cluster_num', y='Count', hue='Time', palette=palette, errorbar=None,
+                     edgecolor='black')  ###errorbar=('ci', 69))
+    for bars, colors in zip(ax.containers, (palette[0::2], palette[1::2])):
+         for bar, color in zip(bars, colors):
+              bar.set_facecolor(color)
+    ax.legend(handles=[tuple(bar_group) for bar_group in ax.containers],
+              labels=[bar_group.get_label() for bar_group in ax.containers],
+              title=ax.legend_.get_title().get_text(),
+              handlelength=4, handler_map={tuple: HandlerTuple(ndivide=None, pad=0.1)})
+    # Customize the plot
+    plt.title(f'{basename}, Pal Taste {pal_taste}')
+    plt.xlabel('Cluster Number', fontsize = 14)
+    plt.ylabel('Count', fontsize = 14)
+    plt.legend(title='')
+
+    plt.show()
+    
+    
+    
+    
 
 
 '''
@@ -469,10 +630,6 @@ for basename, taste_group in grouped:
     plt.savefig(clust_all_path)
     plt.clf()
 
-
-# ==============================================================================
-# Chi-Squared test for frequency of behaviors
-# ==============================================================================
 
 
 
