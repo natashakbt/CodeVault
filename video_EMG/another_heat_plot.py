@@ -63,6 +63,7 @@ for dirname in dirs:
             path_scoring_dict.append(file)
     #scoring_dict = dict(np.load(path_scoring_dict, allow_pickle=True))
     
+    
 vid_trial_start = {}
 behavior_dict ={}
 for path in path_scoring_dict:
