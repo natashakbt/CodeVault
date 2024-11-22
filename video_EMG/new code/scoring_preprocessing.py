@@ -20,7 +20,7 @@ import json
 # Ensure info input below is correct
 # =============================================================================
 base_folder = '/media/natasha/drive2/Natasha_Data' # Parent folder containing all rats' data
-columns_to_keep = ['Behavior', 'Modifier #1', 'Modifier #2', 'Behavior type', 'Time']
+columns_to_keep = ['Observation id', 'Behavior', 'Modifier #1', 'Modifier #2', 'Behavior type', 'Time']
 rat_list = ['NB32', 'NB34', 'NB35']
 test_day = [1, 2, 3] # Greatest number of test days 
 scorer_initials = ['YW', 'NBT']  # Initials of all scorers, as found in [filename]_SCORER.csv
@@ -102,9 +102,9 @@ def add_taste_names(matching_df, dirname):
         delivery_num = table_with_trial_info[trial_num][1]
         matching_df.loc[idx, 'Tastant'] = tst
         matching_df.loc[idx, 'DelivNum'] = delivery_num
-        matching_df.loc[idx, 'TastantNum'] = table_with_trial_info[0][0]
-        
-    return(matching_df)
+        matching_df.loc[idx, 'TastantNum'] = table_with_trial_info[idx][0]
+  
+    return matching_df
 
 
 # =============================================================================
@@ -125,6 +125,7 @@ for rat_name in rat_list:
 
 csv_paths = []
 for dirname in tqdm(dirs):
+#for dirname in [dirs[5]]:
     # Transforming csv files exported from BORIS into a dictionary used for analysis
     csv_path = glob.glob(os.path.join(dirname, '**', '*.csv'), recursive=True) #finding all csv files
     for path in csv_path.copy(): # Removing the electrode_layout.csv
@@ -142,7 +143,7 @@ for dirname in tqdm(dirs):
         columns_to_drop = [col for col in boris_df.columns if col not in columns_to_keep]
         boris_df.drop(columns=columns_to_drop, inplace=True)
 
-        mask = boris_df.iloc[:, 0] == 'trial start'
+        mask = boris_df['Behavior'] == 'trial start'
         temp_trial_df = boris_df[mask]
         scoring_df = boris_df[~mask]
         
@@ -156,12 +157,13 @@ for dirname in tqdm(dirs):
     
     
     matching_df = check_trial_dfs(temp_trial_dict)
+    print(matching_df)
     matching_df.drop(['Behavior', 'Behavior type', 'Time_curr'], axis = 1, inplace = True)
     matching_df.rename(columns={'Modifier #1': 'Trial_num', 'Time_prev': 'Time'}, inplace = True)
     matching_df[['Tastant', 'DelivNum', 'TastantNum']] = None
     
     final_trial_df = add_taste_names(matching_df, dirname)
-    
+    #print("CHECK THIS OUT:", final_trial_df)
 
     # TODO: CHECK THAT EVERY SCORING_DF IS PROPERLY CONFIGURED (ALT. START/STOP)
     
@@ -171,8 +173,8 @@ for dirname in tqdm(dirs):
     
     # Process and save the scoring dictionary
     basename = os.path.basename(csv)
-    new_dict_filename = basename.rsplit('_', 1)[0] + '_scored_behaviors.npz'
-    np.savez(os.path.join(new_dir, new_dict_filename), scoring_dict)
+    new_dict_filename = basename.rsplit('_', 1)[0] + '_scored_behaviors.npy'
+    np.save(os.path.join(new_dir, new_dict_filename), scoring_dict)
     print('\nIn', new_dir, 'saving:\n', new_dict_filename)
     
     # Process and save the final trial DataFrame as a pickle file
