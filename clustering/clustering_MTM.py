@@ -39,19 +39,32 @@ mtm_bool = df.event_type.str.contains('MTMs')
 mtm_df_all = df.loc[mtm_bool]
 
 '''
+Check starting here - trying to figure out bimodal analysis which isn't working
+'''
 # ==============================================================================
 # Remove any bimodal-shaped EMG segments
 # ==============================================================================
 # Test which segments are bimodal using diptest statistic
 p_values = []
 #segment_raw = mtm_df_all['baseline_scaled_segments']
-segment_raw = mtm_df_all['segment_raw']
-for index, segment in enumerate(segment_raw):
+segment_raw = np.stack(mtm_df_all['segment_raw'].values)
+for segment in segment_raw:
     dip, pval = diptest.diptest(segment)
     p_values.append(pval)
+    
+# Graph Abu made
+# sort_inds = np.argsort(p_values)
+sort_inds = np.array(p_values) < 0.05
+
+fig, ax = plt.subplots(1,2, sharey=True, figsize=(7,15))
+ax[0].imshow(segment_raw[sort_inds], aspect='auto', interpolation='nearest')
+im = ax[1].imshow(np.array(p_values)[sort_inds,None], aspect='auto', interpolation='nearest')
+plt.colorbar(im)
 
 # Add p-value to dataframe
-mtm_df_all.loc[:,'p_value'] = p_values
+#mtm_df_all.loc[:,'p_value'] = p_values
+mtm_df_all = mtm_df_all.assign(p_value=p_values)
+
 # Select MTMs that have a significant p-value
 mtm_df_multi = mtm_df_all[mtm_df_all['p_value'] < 0.005]
 
@@ -64,17 +77,99 @@ png_files = glob.glob(os.path.join(output_dir, '*.png'))
 for file in png_files:
     os.remove(file)
 
+for index, row in mtm_df_multi.iterrows():
+    if index >= 100: # DELETE THIS ONCE IT'S ALL WORKING, JUST DOESN FIRST 100 FOR SPEED
+        break
+    segment = np.array(row['segment_norm_interp']) #CHANGED THIS # Convert segment to a numpy array
+    p_val = row['p_value']
+
+
+     # Compute CDF
+    sorted_segment = np.sort(segment)
+    cdf = np.arange(1, len(sorted_segment) + 1) / len(sorted_segment)
+    # Plot waveform
+    plt.figure(figsize=(6, 10))
+    plt.subplot(2, 1, 1)
+    plt.plot(segment, label="Waveform")
+    plt.title(f"Segment {index} - p-value: {p_val}")
+    plt.legend()
+
+    # Plot CDF
+    plt.subplot(2, 1, 2)
+    plt.plot(sorted_segment, cdf, label="CDF", color="orange")
+    plt.xlabel("Value")
+    plt.ylabel("CDF")
+    plt.title("Cumulative Distribution Function")
+    plt.legend()
+
+    # Save the figure
+    plt_title = f"segment_{index}_{p_val:.4f}.png"
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, plt_title))
+    plt.clf()
+
+### THIS IS NEW
+# Select MTMs that have a significant p-value
+mtm_df_uni = mtm_df_all[mtm_df_all['p_value'] > 0.005]
+
+
+# Create folder for plots of multimodal segments
+output_dir = os.path.join(dirname, 'unimodal_segments')
+os.makedirs(output_dir, exist_ok=True)
+# Remove any png files in plots folder
+png_files = glob.glob(os.path.join(output_dir, '*.png'))
+for file in png_files:
+    os.remove(file)
+
+for index, row in mtm_df_uni.iterrows():
+    if index >= 100:
+        break
+    segment = np.array(row['segment_norm_interp']) #CHANGED THIS # Convert segment to a numpy array
+    p_val = row['p_value']
+
+
+     # Compute CDF
+    sorted_segment = np.sort(segment)
+    cdf = np.arange(1, len(sorted_segment) + 1) / len(sorted_segment)
+    # Plot waveform
+    plt.figure(figsize=(6, 10))
+    plt.subplot(2, 1, 1)
+    plt.plot(segment, label="Waveform")
+    plt.title(f"Segment {index} - p-value: {p_val}")
+    plt.legend()
+
+    # Plot CDF
+    plt.subplot(2, 1, 2)
+    plt.plot(sorted_segment, cdf, label="CDF", color="orange")
+    plt.xlabel("Value")
+    plt.ylabel("CDF")
+    plt.title("Cumulative Distribution Function")
+    plt.legend()
+
+    # Save the figure
+    plt_title = f"segment_{index}_{p_val:.4f}.png"
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, plt_title))
+    plt.clf()
+
+### THE ABOVE IS NEW
+'''
+CHECK UP TO HERE
+'''
 # Plot all bimodal waveforms. You should double check that they look OK
 for index, row in mtm_df_multi.iterrows():
     segment = row['segment_raw']
     plt.plot(segment)
-    plt_title = f"segment_{index}.png"
+    p_val = row['p_value']
+    plt.title(f"Segment {index} - p-value: {p_val}")
+
+    plt_title = f"segment_{index}_{p_val}.png"
     plt.savefig(os.path.join(output_dir, plt_title))
     plt.clf()
 
 percent_multi = len(mtm_df_multi)/len(mtm_df_all)*100
 print(f'Percent of multimodal waveforms of total: {percent_multi:.2f}%')
-'''
+
 
 # ==============================================================================
 # Create UMAP projection of all MTM events and by session. 
@@ -90,7 +185,7 @@ for file in png_files:
     os.remove(file)
 
 # Use the unimodal MTM waveforms for the rest of the analyses
-#mtm_df = mtm_df_all[mtm_df_all['p_value'] >= 0.005]
+#mtm_df = mtm_df_all[mtm_df_all['p_value'] >= 0.005] # UNCOMMENT THIS ONCE I FIX THE BIMODAL TEST
 mtm_df = mtm_df_all
 # Array of every MTM event and their values for each of the 8 features
 mtm_features = np.stack(mtm_df.features.values)
@@ -204,7 +299,7 @@ for session in df.session_ind.unique():
         # Find the number of components with the lowest BIC
         optimal_n_components = n_components_range[np.argmin(bic_scores)]
         #print(f'Session {session}: Optimal number of clusters is {optimal_n_components}')
-        optimal_n_components = 3
+        optimal_n_components = 3 # USE THIS TO SET A SPECIFIC NUMBER OF CLUSTERS
         # Store the optimal clusters number and the number of MTMs within a session
         optimal_cluster_list.append(optimal_n_components)
         session_size_list.append(len(mtm_session_df))
