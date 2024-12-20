@@ -30,6 +30,8 @@ df = df.rename(columns={'pred_event_type': 'event_type'})
 unique_basenames = df['basename'].unique()
 basename_to_num = {name: idx for idx, name in enumerate(unique_basenames)}
 df['session_ind'] = df['basename'].map(basename_to_num)
+df.rename_axis("obsolete_idx", inplace=True) # Default Index does not increment by 1. Renaming it.
+df.reset_index(inplace=True) # Make new Index that increments by 1 per row
 
 # Make a dataframe of just mouth or tongue movement events
 #mtm_bool = df.event_type.str.contains('mouth or tongue movement')
@@ -40,10 +42,14 @@ mtm_df_all = df.loc[mtm_bool]
 # ==============================================================================
 # Test which segments are bimodal, add to array
 # ==============================================================================
+df['multimodal'] = 'n/a'
+
 multi_segments = []
 uni_segments = []
 
 for index, row in mtm_df_all.iterrows():
+#for idx in mtm_df_all.index: #ChatGPT not working
+    #row = mtm_df_all.loc[idx] #ChatGPT not working
     segment = row['segment_raw']
     corr = signal.correlate(segment, segment) # Correlate segment against itself
     lags = signal.correlation_lags(len(segment), len(segment))
@@ -54,8 +60,10 @@ for index, row in mtm_df_all.iterrows():
     # Put categorized segments into respective lists
     if len(corr_peaks) > 0:
         multi_segments.append(row['segment_norm_interp'])
+        df.loc[index, 'multimodal'] = 'yes' 
     else:
         uni_segments.append(row['segment_norm_interp'])
+        df.loc[index, 'multimodal'] = 'no'
     
     #fig, (ax_seg, ax_corr) = plt.subplots(2,1, figsize=(7,10))
     #ax_seg.plot(row['segment_raw'])
@@ -80,13 +88,44 @@ ax_multi.set_ylabel("Amplitude")
 for segment in uni_segments:
     ax_uni.plot(segment, alpha=0.1, label="Unimodal Segments", color='cornflowerblue')
 
-ax_uni.set_title("Unimodal Segements")
+ax_uni.set_title("Unimodal Segments")
 ax_uni.set_xlabel("Time")
 ax_uni.set_ylabel("Amplitude")
 fig.suptitle("Normalized Segments")
 
 fig.tight_layout()
 plt.show()  
+
+
+
+
+# UMAP dimmentionality reduction and feature scaling
+reducer = umap.UMAP()
+
+new_mtm_bool = df.event_type.str.contains('MTMs')
+new_mtm_df_all = df.loc[new_mtm_bool]
+
+waveforms = new_mtm_df_all['segment_norm_interp'].tolist()
+#scaled_waveforms = StandardScaler().fit_transform(waveforms)
+embedding = reducer.fit_transform(waveforms) # UMAP embedding
+
+color_map = {'yes': 'blue', 'no': 'orange'}  # Define colors for 'yes' and 'no'
+colors = new_mtm_df_all['multimodal'].map(color_map)
+# Create the UMAP scatter plot
+plt.figure(figsize=(10, 8))
+plt.scatter(
+    embedding[:, 0], embedding[:, 1], 
+    c=colors, s=5
+)
+
+# Add legend for 'multimodal' categories
+for value, color in color_map.items():
+    plt.scatter([], [], c=color, label=value)  # Invisible points for legend
+
+plt.legend(title='Multimodal', loc='upper right')
+plt.show()
+
+
 
     
     
