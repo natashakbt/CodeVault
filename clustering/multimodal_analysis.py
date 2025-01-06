@@ -22,8 +22,8 @@ from scipy.signal import find_peaks
 # Load data and get setup
 # ==============================================================================
 dirname = '/home/natasha/Desktop/clustering_data/'
-#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only labeled stuff?
-file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') #everything with predictions?
+#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl')
+file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl')
 df = pd.read_pickle(file_path)
 df = df.rename(columns={'pred_event_type': 'event_type'})
 
@@ -40,16 +40,17 @@ mtm_df_all = df.loc[mtm_bool]
 
 
 # ==============================================================================
-# Test which segments are bimodal, add to array
+# Test which waveforms are bimodal (using non-normalized waveforms)
+# Compute the cross-correlation of each wavweform with itself
+# Examine the cross-correlation function (at only positive lag values) for peaks
+# -> Multi-modal waveforms have 1 or more peaks 
 # ==============================================================================
-df['multimodal'] = 'n/a'
+df['multimodal'] = 'n/a' # Create column called 'multimodal' with n/a as default
 
 multi_segments = []
 uni_segments = []
 
 for index, row in mtm_df_all.iterrows():
-#for idx in mtm_df_all.index: #ChatGPT not working
-    #row = mtm_df_all.loc[idx] #ChatGPT not working
     segment = row['segment_raw']
     corr = signal.correlate(segment, segment) # Correlate segment against itself
     lags = signal.correlation_lags(len(segment), len(segment))
@@ -58,6 +59,7 @@ for index, row in mtm_df_all.iterrows():
     corr_peaks, _ = find_peaks(pos_corr) # Test if cross-correlation has 1+ peaks, indicating multimodality
     
     # Put categorized segments into respective lists
+    # Add 'yes' or 'no' value to 'multimodal' column
     if len(corr_peaks) > 0:
         multi_segments.append(row['segment_norm_interp'])
         df.loc[index, 'multimodal'] = 'yes' 
@@ -65,6 +67,8 @@ for index, row in mtm_df_all.iterrows():
         uni_segments.append(row['segment_norm_interp'])
         df.loc[index, 'multimodal'] = 'no'
     
+    ## Use code below to plot each waveform and its cross-correlation. 
+    ## WARNING: So many waveforms that it takes hours and then crashes 
     #fig, (ax_seg, ax_corr) = plt.subplots(2,1, figsize=(7,10))
     #ax_seg.plot(row['segment_raw'])
     #if len(corr_peaks) > 0:
@@ -73,59 +77,68 @@ for index, row in mtm_df_all.iterrows():
     #    ax_corr.plot(pos_corr)
     #ax_corr.plot(corr_peaks, pos_corr[corr_peaks], "x", markersize=20)
 
-# Plot all uni/multimodal segments overlapped
+# Overwrite data without multimodal segments
+df_filter_multimodal = df[df['multimodal'] != 'yes'] # Remove multimodal from df
+df_filter_multimodal.to_pickle(file_path) # Overwrite and save dataset
+
+
+# ==============================================================================
+# Plots for visualizing uni/multi-modal waveforms
+# ==============================================================================
+# Create folder for saving plots
+multimodal_dir = os.path.join(dirname, 'multimodal_analysis')
+os.makedirs(multimodal_dir, exist_ok=True)
+# Remove any files in new folder
+all_files = glob.glob(os.path.join(multimodal_dir, '*'))
+for file in all_files:
+    os.remove(file)
+    
+
+## Plot all uni/multimodal segments overlapped
+## NB: Using normalized segments just for plotting
 fig, (ax_uni, ax_multi) = plt.subplots(2, 1, figsize=(8, 8))
-
-# Plot multimodal segments
-for segment in multi_segments:
-    ax_multi.plot(segment, alpha=0.1, label="Multimodal Segments", color='cornflowerblue')
-
-ax_multi.set_title("Multimodal Segments")
-ax_multi.set_xlabel("Time")
-ax_multi.set_ylabel("Amplitude")
 
 # Plot unimodal segments
 for segment in uni_segments:
     ax_uni.plot(segment, alpha=0.1, label="Unimodal Segments", color='cornflowerblue')
-
 ax_uni.set_title("Unimodal Segments")
 ax_uni.set_xlabel("Time")
 ax_uni.set_ylabel("Amplitude")
 fig.suptitle("Normalized Segments")
 
+# Plot multimodal segments
+for segment in multi_segments:
+    ax_multi.plot(segment, alpha=0.1, label="Multimodal Segments", color='lightcoral')
+ax_multi.set_title("Multimodal Segments")
+ax_multi.set_xlabel("Time")
+ax_multi.set_ylabel("Amplitude")
+
 fig.tight_layout()
-plt.show()  
+
+overlap_plt_path = os.path.join(multimodal_dir, 'overlap_waveforms_by_modality.png')
+plt.savefig(overlap_plt_path)
+plt.show()
 
 
-
-
-# UMAP dimmentionality reduction and feature scaling
+# See if multimodal waveforms cluster with UMAP reduction
 reducer = umap.UMAP()
-
 new_mtm_bool = df.event_type.str.contains('MTMs')
 new_mtm_df_all = df.loc[new_mtm_bool]
-
 waveforms = new_mtm_df_all['segment_norm_interp'].tolist()
 #scaled_waveforms = StandardScaler().fit_transform(waveforms)
 embedding = reducer.fit_transform(waveforms) # UMAP embedding
 
-color_map = {'yes': 'blue', 'no': 'orange'}  # Define colors for 'yes' and 'no'
-colors = new_mtm_df_all['multimodal'].map(color_map)
 # Create the UMAP scatter plot
+color_map = {'yes': 'lightcoral', 'no': 'cornflowerblue'}
+colors = new_mtm_df_all['multimodal'].map(color_map)
 plt.figure(figsize=(10, 8))
 plt.scatter(
     embedding[:, 0], embedding[:, 1], 
-    c=colors, s=5
-)
-
-# Add legend for 'multimodal' categories
-for value, color in color_map.items():
+    c=colors, s=5)
+for value, color in color_map.items(): # Add legend for 'multimodal' categories ('yes' or 'no')
     plt.scatter([], [], c=color, label=value)  # Invisible points for legend
-
 plt.legend(title='Multimodal', loc='upper right')
+
+umap_plt_path = os.path.join(multimodal_dir, 'UMAP_waveforms_by_modality.png')
+plt.savefig(umap_plt_path)
 plt.show()
-
-
-
-    
-    
