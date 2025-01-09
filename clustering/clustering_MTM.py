@@ -8,13 +8,15 @@ This is a temporary script file.
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 from sklearn.preprocessing import StandardScaler
 from sklearn.mixture import GaussianMixture
+from sklearn.decomposition import PCA
 import os
 import umap
 import glob
-import diptest
 from scipy import stats
+from sklearn.cluster import KMeans
 
 
 # ==============================================================================
@@ -33,24 +35,24 @@ df['session_ind'] = df['basename'].map(basename_to_num)
 # Make a dataframe of just mouth or tongue movement events
 #mtm_bool = df.event_type.str.contains('mouth or tongue movement')
 mtm_bool = df.event_type.str.contains('MTMs')
-mtm_df_all = df.loc[mtm_bool]
+mtm_df = df.loc[mtm_bool]
+
+
 
 # ==============================================================================
-# Create UMAP projection of all MTM events and by session. 
-# Fit a GMM to the UMAP projection
-# Calculate BIC score to determine best number of GMM clusters
+# Prep folder for saving UMAP clustering plots
 # ==============================================================================
-# Create directory for saving UMAP clustering results
-umap_dir = os.path.join(dirname, 'UMAP_results')
-os.makedirs(umap_dir, exist_ok=True)
+# Create directory 
+clust_dir = os.path.join(dirname, 'clustering_results')
+os.makedirs(clust_dir, exist_ok=True)
 # Remove any png files in plots folder
-png_files = glob.glob(os.path.join(umap_dir, '*.png'))
+png_files = glob.glob(os.path.join(clust_dir, '*.png'))
 for file in png_files:
     os.remove(file)
-
-# Use the unimodal MTM waveforms for the rest of the analyses
-#mtm_df = mtm_df_all[mtm_df_all['p_value'] >= 0.005] # UNCOMMENT THIS ONCE I FIX THE BIMODAL TEST
-mtm_df = mtm_df_all
+  
+# ==============================================================================
+# UMAP of all MTMs in all sessions
+# ==============================================================================
 # Array of every MTM event and their values for each of the 8 features
 mtm_features = np.stack(mtm_df.features.values)
 
@@ -80,7 +82,7 @@ labels = optimal_gmm.predict(embedding)
 # Plot the UMAP projections with optimal GMM clusters
 plt.scatter(embedding[:,0], embedding[:,1], c=labels, cmap='viridis', s=5)
 plt.title(f'All Sessions: UMAP projection with GMM ({optimal_n_components} clusters)')
-umap_all_path = os.path.join(umap_dir, 'all_sessions_umap.png')
+umap_all_path = os.path.join(clust_dir, 'all_sessions_umap.png')
 plt.savefig(umap_all_path)
 plt.clf()
 
@@ -89,54 +91,725 @@ plt.plot(n_components_range, bic_scores, marker='o')
 plt.xlabel('Number of clusters')
 plt.ylabel('BIC')
 plt.title('All Sessions: BIC Scores')
-bic_all_path = os.path.join(umap_dir, 'all_sessions_bic.png')
+bic_all_path = os.path.join(clust_dir, 'all_sessions_bic.png')
 plt.savefig(bic_all_path)
 plt.clf()   
 
 
+# ==============================================================================
+# Important inputs for UMAP of individual sessions
+# ==============================================================================
+#fixed_cluster_num = np.nan
+fixed_cluster_num = np.nan
+iterations = 1 # Number of times to repeat UMAP reduction
 
-# Initialize lists to save relevant calculated values
+
+
+# %% # Run GMM on UMAP of MTMs in individual sessions (OG)
+# ==============================================================================
+# Run GMM on UMAP of MTMs in individual sessions (OG)
+# ==============================================================================
+# Create directory 
+umap_dir = os.path.join(clust_dir, 'UMAP_results')
+os.makedirs(umap_dir, exist_ok=True)
+# Remove any png files in plots folder
+png_files = glob.glob(os.path.join(umap_dir, '*.png'))
+for file in png_files:
+    os.remove(file)
+
+# Initialize lists to keep track of UMAP results
 optimal_cluster_list = []
 session_size_list = []
-
-iterations = 1 # Number of times to repeat UMAP reduction
+pca_dimmensions = []
 
 mtm_df['cluster_num'] = np.nan
 
+if fixed_cluster_num == 3:
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA']
+    cmap = ListedColormap(custom_colors)
+elif fixed_cluster_num == 4:
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA', '#08605F']
+    cmap = ListedColormap(custom_colors)
+else:
+    cmap = 'viridis'
 
-'''
-
+# UMAP with GMM on a session-by-session basis
 for session in df.session_ind.unique():
+    if session == 0:
+        continue
     for i in range(iterations):
         # Filter data for the current session
-        mtm_session_bool = mtm_df.session_ind.astype(str).str.contains(str(session))
-        mtm_session_df = mtm_df.loc[mtm_session_bool].copy()  # Make a copy
+        mtm_session_bool = mtm_df.session_ind == session
+        mtm_session_df = mtm_df.loc[mtm_session_bool].copy()  # Make a copy to avoid SettingWithCopyWarning
+        mtm_session_features = np.stack(mtm_session_df.features.values)
 
-        # Use the same fixed number of clusters (3)
-        optimal_n_components = 3
-        print(f'Session {session}: Optimal number of clusters is {optimal_n_components}')
+        scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features)  # Scale features
+        embedding = reducer.fit_transform(scaled_mtm_session)  # UMAP embedding
+        
+        
+        # Determine the optimal number of clusters using BIC
+        bic_scores = []
+        for n_components in n_components_range:
+            gmm = GaussianMixture(n_components=n_components, random_state=42)
+            gmm.fit(embedding)
+            bic = gmm.bic(embedding)
+            bic_scores.append(bic)
 
-        # Fit the GMM with the fixed number of clusters
+        if np.isnan(fixed_cluster_num): # Find the number of components with the lowest BIC
+            optimal_n_components = n_components_range[np.argmin(bic_scores)]
+        else:
+            optimal_n_components = fixed_cluster_num
+        # Store the optimal clusters number and the number of MTMs within a session
+        optimal_cluster_list.append(optimal_n_components)
+        session_size_list.append(len(mtm_session_df))
+
+        # Fit the GMM with the optimal number of clustersz
         optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
         optimal_gmm.fit(embedding)
         labels = optimal_gmm.predict(embedding)
 
         # Add cluster number label to df dataframe
-        df.loc[(df.session_ind == session) & (df.event_type == 'MTMs'), 'cluster_num'] = labels
+        #df.loc[(df.session_ind == session) & (df.event_type == 'mouth or tongue movement'), 'cluster_num'] = labels
 
         # For speed, only create individual session plots for the first iteration
         if i == 0:
-            # Plot the UMAP projections with optimal GMM clusters
-            plt.scatter(embedding[:, 0], embedding[:, 1], c=labels, cmap='viridis', s=5)
+            # Plot the UMAP projections with optimal GMM clusters, using the custom colormap
+            scatter = plt.scatter(embedding[:, 0], embedding[:, 1], c=labels, cmap=cmap, s=20)
             plt.title(f'Session {session}: UMAP projection with GMM ({optimal_n_components} clusters)')
-            plt.colorbar(label='GMM Cluster')
+
+            # Customize the colorbar (legend)
+            cbar = plt.colorbar(scatter)
+            cbar.set_ticks([])  # Set specific tick positions
+
             umap_session_path = os.path.join(umap_dir, f'session_{session}_umap.png')
             plt.savefig(umap_session_path)
             plt.clf()
 
+            # Plot BIC values for a range of cluster sizes
+            plt.plot(n_components_range, bic_scores, marker='o')
+            plt.xlabel('Number of clusters')
+            plt.ylabel('BIC')
+            plt.title(f'Session {session}: BIC Scores')
+            bic_session_path = os.path.join(umap_dir, f'session_{session}_bic.png')
+            plt.savefig(bic_session_path)
+            plt.clf()
+
+
+
+## Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
+# Define jitter amount
+jitter_strength = 0.25  # Adjust the strength of jitter as needed
+
+# Add jitter to the session size and optimal clusters
+session_size_jittered = np.array(session_size_list) + np.random.normal(0, jitter_strength, len(session_size_list))
+optimal_cluster_jittered = np.array(optimal_cluster_list) + np.random.normal(0, jitter_strength, len(optimal_cluster_list))
+
+# Make scatter plot
+plt.scatter(session_size_jittered, optimal_cluster_jittered, c='cornflowerblue', marker='o')
+plt.xlabel('Session Size')
+plt.ylabel('Optimal Number of Clusters')
+plt.title(f'Optimal Cluster Number vs Session Size ({iterations} iterations)')
+scatter_plot_path = os.path.join(umap_dir, 'optimal_clusters_vs_session_size.png')
+plt.savefig(scatter_plot_path)
+plt.show()
+    
+## Histogram of ditribution of optimal cluster sizes across all iterations
+mode_result = stats.mode(optimal_cluster_list, keepdims=False)
+print(f"The mode is: {mode_result[0]}")
+    
+plt.hist(optimal_cluster_list, bins=len(n_components_range), 
+         color='cornflowerblue', 
+         edgecolor='black')
+plt.axvline(x=mode_result[0]+0.3, 
+            color='red', 
+            linestyle='--', 
+            linewidth=2)
+plt.xlabel('Optimal Number of Clusters')
+plt.ylabel('Frequency')
+plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
+histogram_path = os.path.join(umap_dir, 'optimal_clusters_histogram.png')
+plt.savefig(histogram_path)
+plt.show()
+    
+
+#%%
+# ==============================================================================
+# Run GMM on UMAP/PCA of MTMs in individual sessions
+# ==============================================================================
+# Create directory 
+gmm_dir = os.path.join(clust_dir, 'PCA-GMM_results')
+os.makedirs(umap_dir, exist_ok=True)
+# Remove any png files in plots folder
+png_files = glob.glob(os.path.join(umap_dir, '*.png'))
+for file in png_files:
+    os.remove(file)
+
+# Initialize lists to keep track of UMAP results
+optimal_cluster_list = []
+session_size_list = []
+pca_dimmensions = []
+
+mtm_df['cluster_num'] = np.nan
+
+if fixed_cluster_num == 3:
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA']
+    cmap = ListedColormap(custom_colors)
+elif fixed_cluster_num == 4:
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA', '#08605F']
+    cmap = ListedColormap(custom_colors)
+else:
+    cmap = 'viridis'
+
+# UMAP with GMM on a session-by-session basis
+for session in df.session_ind.unique():
+    if session == 0:
+        continue
+    for i in range(iterations):
+        # Filter data for the current session
+        mtm_session_bool = mtm_df.session_ind == session
+        mtm_session_df = mtm_df.loc[mtm_session_bool].copy()  # Make a copy to avoid SettingWithCopyWarning
+        mtm_session_features = np.stack(mtm_session_df.features.values)
+
+        scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features)  # Scale features
+
+        pca = PCA(n_components=0.9)
+        embedding = pca.fit_transform(scaled_mtm_session)
+        
+        pca_dimmensions.append(embedding.shape[1])
+        
+        embedding_umap = reducer.fit_transform(scaled_mtm_session)  # UMAP embedding
+        
+        
+        # Determine the optimal number of clusters using BIC
+        bic_scores = []
+        for n_components in n_components_range:
+            gmm = GaussianMixture(n_components=n_components, random_state=42)
+            gmm.fit(embedding)
+            bic = gmm.bic(embedding)
+            bic_scores.append(bic)
+
+        if np.isnan(fixed_cluster_num): # Find the number of components with the lowest BIC
+            optimal_n_components = n_components_range[np.argmin(bic_scores)]
+        else:
+            optimal_n_components = fixed_cluster_num
+        # Store the optimal clusters number and the number of MTMs within a session
+        optimal_cluster_list.append(optimal_n_components)
+        session_size_list.append(len(mtm_session_df))
+
+        # Fit the GMM with the optimal number of clustersz
+        optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
+        optimal_gmm.fit(embedding)
+        labels = optimal_gmm.predict(embedding)
+
+        # Add cluster number label to df dataframe
+        #df.loc[(df.session_ind == session) & (df.event_type == 'mouth or tongue movement'), 'cluster_num'] = labels
+
+        # For speed, only create individual session plots for the first iteration
+        if i == 0:
+            # Plot the UMAP projections with optimal GMM clusters, using the custom colormap
+            scatter = plt.scatter(embedding_umap[:, 0], embedding_umap[:, 1], c=labels, cmap=cmap, s=20)
+            plt.title(f'Session {session}: UMAP projection with GMM ({optimal_n_components} clusters)')
+
+            # Customize the colorbar (legend)
+            cbar = plt.colorbar(scatter)
+            cbar.set_ticks([])  # Set specific tick positions
+
+            umap_session_path = os.path.join(umap_dir, f'session_{session}_umap.png')
+            plt.savefig(umap_session_path)
+            plt.clf()
+
+            # Plot BIC values for a range of cluster sizes
+            plt.plot(n_components_range, bic_scores, marker='o')
+            plt.xlabel('Number of clusters')
+            plt.ylabel('BIC')
+            plt.title(f'Session {session}: BIC Scores')
+            bic_session_path = os.path.join(umap_dir, f'session_{session}_bic.png')
+            plt.savefig(bic_session_path)
+            plt.clf()
+
+
+
+## Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
+# Define jitter amount
+jitter_strength = 0.25  # Adjust the strength of jitter as needed
+
+# Add jitter to the session size and optimal clusters
+session_size_jittered = np.array(session_size_list) + np.random.normal(0, jitter_strength, len(session_size_list))
+optimal_cluster_jittered = np.array(optimal_cluster_list) + np.random.normal(0, jitter_strength, len(optimal_cluster_list))
+
+# Make scatter plot
+plt.scatter(session_size_jittered, optimal_cluster_jittered, c='cornflowerblue', marker='o')
+plt.xlabel('Session Size')
+plt.ylabel('Optimal Number of Clusters')
+plt.title(f'Optimal Cluster Number vs Session Size ({iterations} iterations)')
+scatter_plot_path = os.path.join(umap_dir, 'optimal_clusters_vs_session_size.png')
+plt.savefig(scatter_plot_path)
+plt.show()
+    
+## Histogram of ditribution of optimal cluster sizes across all iterations
+mode_result = stats.mode(optimal_cluster_list, keepdims=False)
+print(f"The mode is: {mode_result[0]}")
+    
+plt.hist(optimal_cluster_list, bins=len(n_components_range), 
+         color='cornflowerblue', 
+         edgecolor='black')
+plt.axvline(x=mode_result[0]+0.3, 
+            color='red', 
+            linestyle='--', 
+            linewidth=2)
+plt.xlabel('Optimal Number of Clusters')
+plt.ylabel('Frequency')
+plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
+histogram_path = os.path.join(umap_dir, 'optimal_clusters_histogram.png')
+plt.savefig(histogram_path)
+plt.show()
+    
+
+
+
+
+
+
+# %% # Run KMeans on PCA of MTMs in individual sessions
+
+
+# ==============================================================================
+# Run KMeans on PCA of MTMs in individual sessions
+# ==============================================================================
+# Setup directory for plots
+kmeans_dir = os.path.join(umap_dir, 'KMeans')
+os.makedirs(kmeans_dir, exist_ok=True)
+# Remove any png files in plots folder
+png_files = glob.glob(os.path.join(kmeans_dir, '*.png'))
+for file in png_files:
+    os.remove(file)
+
+
+# Initialize lists to keep track of UMAP results
+optimal_cluster_list = []
+session_size_list = []
+pca_dimmensions = []
+
+mtm_df['cluster_num'] = np.nan
+
+if fixed_cluster_num == 3:
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA']
+    cmap = ListedColormap(custom_colors)
+elif fixed_cluster_num == 4:
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA', '#08605F']
+    cmap = ListedColormap(custom_colors)
+else:
+    cmap = 'viridis'
+
+# UMAP with GMM on a session-by-session basis
+for session in df.session_ind.unique():
+    if session == 0:
+        continue
+    for i in range(iterations):
+        # Filter data for the current session
+        mtm_session_bool = mtm_df.session_ind == session
+        mtm_session_df = mtm_df.loc[mtm_session_bool].copy()  # Make a copy to avoid SettingWithCopyWarning
+        mtm_session_features = np.stack(mtm_session_df.features.values)
+
+        scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features)  # Scale features
+
+        pca = PCA(n_components=0.9)
+        embedding = pca.fit_transform(scaled_mtm_session)
+        
+        pca_dimmensions.append(embedding.shape[1])
+        
+        embedding_umap = reducer.fit_transform(scaled_mtm_session)  # UMAP embedding
+        
+        
+        # Determine the optimal number of clusters using squared error
+        inertia = []
+        for n_components in n_components_range:
+
+            kmeans = KMeans(n_clusters=n_components, n_init="auto").fit(embedding)
+
+            inertia.append(kmeans.inertia_)
+
+        if np.isnan(fixed_cluster_num): # Find the number of components with the lowest BIC
+            optimal_n_components = n_components_range[np.argmin(inertia)]
+        else:
+            optimal_n_components = fixed_cluster_num
+        # Store the optimal clusters number and the number of MTMs within a session
+        optimal_cluster_list.append(optimal_n_components)
+        session_size_list.append(len(mtm_session_df))
+
+        # Fit the GMM with the optimal number of clustersz
+        optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
+        optimal_gmm.fit(embedding)
+        labels = optimal_gmm.predict(embedding)
+
+        # Add cluster number label to df dataframe
+        #df.loc[(df.session_ind == session) & (df.event_type == 'mouth or tongue movement'), 'cluster_num'] = labels
+
+        # For speed, only create individual session plots for the first iteration
+        if i == 0:
+            # Plot the UMAP projections with optimal GMM clusters, using the custom colormap
+            scatter = plt.scatter(embedding_umap[:, 0], embedding_umap[:, 1], c=labels, cmap=cmap, s=20)
+            plt.title(f'Session {session}: UMAP Projection of KMeans Clustering on PCA ({optimal_n_components} clusters)')
+
+            # Customize the colorbar (legend)
+            cbar = plt.colorbar(scatter)
+            cbar.set_ticks([])  # Set specific tick positions
+
+            kmeans_session_path = os.path.join(kmeans_dir, f'session_{session}_kmeans.png')
+            plt.savefig(kmeans_session_path)
+            plt.clf()
+
+            # Plot inertia values for a range of cluster sizes
+            plt.plot(n_components_range, inertia, marker='o')
+            plt.xlabel('Cluster Sizes')
+            plt.ylabel('Inertia')
+            plt.title(f'Session {session}: Elbow for optimal k')
+            inertia_session_path = os.path.join(kmeans_dir, f'session_{session}_inertia.png')
+            plt.savefig(inertia_session_path)
+            plt.clf()
+
+
+
+## Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
+# Define jitter amount
+jitter_strength = 0.25  # Adjust the strength of jitter as needed
+
+# Add jitter to the session size and optimal clusters
+session_size_jittered = np.array(session_size_list) + np.random.normal(0, jitter_strength, len(session_size_list))
+optimal_cluster_jittered = np.array(optimal_cluster_list) + np.random.normal(0, jitter_strength, len(optimal_cluster_list))
+
+# Make scatter plot
+plt.scatter(session_size_jittered, optimal_cluster_jittered, c='cornflowerblue', marker='o')
+plt.xlabel('Session Size')
+plt.ylabel('Optimal Number of Clusters')
+plt.title(f'Optimal Cluster Number vs Session Size ({iterations} iterations)')
+scatter_plot_path = os.path.join(umap_dir, 'optimal_clusters_vs_session_size.png')
+plt.savefig(scatter_plot_path)
+plt.show()
+    
+## Histogram of ditribution of optimal cluster sizes across all iterations
+mode_result = stats.mode(optimal_cluster_list, keepdims=False)
+print(f"The mode is: {mode_result[0]}")
+    
+plt.hist(optimal_cluster_list, bins=len(n_components_range), 
+         color='cornflowerblue', 
+         edgecolor='black')
+plt.axvline(x=mode_result[0]+0.3, 
+            color='red', 
+            linestyle='--', 
+            linewidth=2)
+plt.xlabel('Optimal Number of Clusters')
+plt.ylabel('Frequency')
+plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
+histogram_path = os.path.join(umap_dir, 'optimal_clusters_histogram.png')
+plt.savefig(histogram_path)
+plt.show()
+    
+
+
+# %% # Run GMM on PCA of MTMs in individual sessions (TO UPDATE!) - add mahal dist
+# ==============================================================================
+# Run GMM on PCA of MTMs in individual sessions (TO UPDATE!) - add mahal dist
+# ==============================================================================
+# Create directory 
+umap_dir = os.path.join(clust_dir, 'UMAP_results')
+os.makedirs(umap_dir, exist_ok=True)
+# Remove any png files in plots folder
+png_files = glob.glob(os.path.join(umap_dir, '*.png'))
+for file in png_files:
+    os.remove(file)
+
+# Initialize lists to keep track of UMAP results
+optimal_cluster_list = []
+session_size_list = []
+pca_dimmensions = []
+
+mtm_df['cluster_num'] = np.nan
+
+if fixed_cluster_num == 3:
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA']
+    cmap = ListedColormap(custom_colors)
+elif fixed_cluster_num == 4:
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA', '#08605F']
+    cmap = ListedColormap(custom_colors)
+else:
+    cmap = 'viridis'
+
+# UMAP with GMM on a session-by-session basis
+for session in df.session_ind.unique():
+    if session == 0:
+        continue
+    for i in range(iterations):
+        # Filter data for the current session
+        mtm_session_bool = mtm_df.session_ind == session
+        mtm_session_df = mtm_df.loc[mtm_session_bool].copy()  # Make a copy to avoid SettingWithCopyWarning
+        mtm_session_features = np.stack(mtm_session_df.features.values)
+
+        scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features)  # Scale features
+
+        pca = PCA(n_components=0.9)
+        embedding = pca.fit_transform(scaled_mtm_session)
+        
+        pca_dimmensions.append(embedding.shape[1])
+        
+        embedding_umap = reducer.fit_transform(scaled_mtm_session)  # UMAP embedding of PCA - for plotting
+        
+        
+        # Determine the optimal number of clusters using BIC
+        bic_scores = []
+        for n_components in n_components_range:
+            gmm = GaussianMixture(n_components=n_components, random_state=42)
+            gmm.fit(embedding)
+            bic = gmm.bic(embedding)
+            bic_scores.append(bic)
+
+        # TODO: ADD SEGMENTED REGRESSION ON BIC TO FIND ELBOW. DON'T RELY ON MINIMUM VALUE
+        if np.isnan(fixed_cluster_num): # Find the number of components with the lowest BIC
+            optimal_n_components = n_components_range[np.argmin(bic_scores)]
+        else:
+            optimal_n_components = fixed_cluster_num
+        # Store the optimal clusters number and the number of MTMs within a session
+        optimal_cluster_list.append(optimal_n_components)
+        session_size_list.append(len(mtm_session_df))
+
+        # Fit the GMM with the optimal number of clustersz
+        optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
+        optimal_gmm.fit(embedding)
+        labels = optimal_gmm.predict(embedding)
+
+        # Add cluster number label to df dataframe
+        #df.loc[(df.session_ind == session) & (df.event_type == 'mouth or tongue movement'), 'cluster_num'] = labels
+
+        # For speed, only create individual session plots for the first iteration
+        if i == 0:
+            # Plot the UMAP projections with optimal GMM clusters, using the custom colormap
+            scatter = plt.scatter(embedding_umap[:, 0], embedding_umap[:, 1], c=labels, cmap=cmap, s=20)
+            plt.title(f'Session {session}: UMAP projection with GMM ({optimal_n_components} clusters)')
+
+            # Customize the colorbar (legend)
+            cbar = plt.colorbar(scatter)
+            cbar.set_ticks([])  # Set specific tick positions
+
+            umap_session_path = os.path.join(umap_dir, f'session_{session}_umap-of-PCA.png')
+            plt.savefig(umap_session_path)
+            plt.clf()
+
+            # Plot BIC values for a range of cluster sizes
+            plt.plot(n_components_range, bic_scores, marker='o')
+            plt.xlabel('Number of clusters')
+            plt.ylabel('BIC')
+            plt.title(f'Session {session}: BIC Scores')
+            bic_session_path = os.path.join(umap_dir, f'session_{session}_bic.png')
+            plt.savefig(bic_session_path)
+            plt.clf()
+
+
+
+## Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
+# Define jitter amount
+jitter_strength = 0.25  # Adjust the strength of jitter as needed
+
+# Add jitter to the session size and optimal clusters
+session_size_jittered = np.array(session_size_list) + np.random.normal(0, jitter_strength, len(session_size_list))
+optimal_cluster_jittered = np.array(optimal_cluster_list) + np.random.normal(0, jitter_strength, len(optimal_cluster_list))
+
+# Make scatter plot
+plt.scatter(session_size_jittered, optimal_cluster_jittered, c='cornflowerblue', marker='o')
+plt.xlabel('Session Size')
+plt.ylabel('Optimal Number of Clusters')
+plt.title(f'Optimal Cluster Number vs Session Size ({iterations} iterations)')
+scatter_plot_path = os.path.join(umap_dir, 'optimal_clusters_vs_session_size.png')
+plt.savefig(scatter_plot_path)
+plt.show()
+    
+## Histogram of ditribution of optimal cluster sizes across all iterations
+mode_result = stats.mode(optimal_cluster_list, keepdims=False)
+print(f"The mode is: {mode_result[0]}")
+    
+plt.hist(optimal_cluster_list, bins=len(n_components_range), 
+         color='cornflowerblue', 
+         edgecolor='black')
+plt.axvline(x=mode_result[0]+0.3, 
+            color='red', 
+            linestyle='--', 
+            linewidth=2)
+plt.xlabel('Optimal Number of Clusters')
+plt.ylabel('Frequency')
+plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
+histogram_path = os.path.join(umap_dir, 'optimal_clusters_histogram.png')
+plt.savefig(histogram_path)
+plt.show()
+    
+
+#%%
+# ==============================================================================
+# Run GMM on UMAP/PCA of MTMs in individual sessions
+# ==============================================================================
+# Create directory 
+gmm_dir = os.path.join(clust_dir, 'PCA-GMM_results')
+os.makedirs(umap_dir, exist_ok=True)
+# Remove any png files in plots folder
+png_files = glob.glob(os.path.join(umap_dir, '*.png'))
+for file in png_files:
+    os.remove(file)
+
+# Initialize lists to keep track of UMAP results
+optimal_cluster_list = []
+session_size_list = []
+pca_dimmensions = []
+
+mtm_df['cluster_num'] = np.nan
+
+if fixed_cluster_num == 3:
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA']
+    cmap = ListedColormap(custom_colors)
+elif fixed_cluster_num == 4:
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA', '#08605F']
+    cmap = ListedColormap(custom_colors)
+else:
+    cmap = 'viridis'
+
+# UMAP with GMM on a session-by-session basis
+for session in df.session_ind.unique():
+    if session == 0:
+        continue
+    for i in range(iterations):
+        # Filter data for the current session
+        mtm_session_bool = mtm_df.session_ind == session
+        mtm_session_df = mtm_df.loc[mtm_session_bool].copy()  # Make a copy to avoid SettingWithCopyWarning
+        mtm_session_features = np.stack(mtm_session_df.features.values)
+
+        scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features)  # Scale features
+
+        pca = PCA(n_components=0.9)
+        embedding = pca.fit_transform(scaled_mtm_session)
+        
+        pca_dimmensions.append(embedding.shape[1])
+        
+        embedding_umap = reducer.fit_transform(scaled_mtm_session)  # UMAP embedding
+        
+        
+        # Determine the optimal number of clusters using BIC
+        bic_scores = []
+        for n_components in n_components_range:
+            gmm = GaussianMixture(n_components=n_components, random_state=42)
+            gmm.fit(embedding)
+            bic = gmm.bic(embedding)
+            bic_scores.append(bic)
+
+        if np.isnan(fixed_cluster_num): # Find the number of components with the lowest BIC
+            optimal_n_components = n_components_range[np.argmin(bic_scores)]
+        else:
+            optimal_n_components = fixed_cluster_num
+        # Store the optimal clusters number and the number of MTMs within a session
+        optimal_cluster_list.append(optimal_n_components)
+        session_size_list.append(len(mtm_session_df))
+
+        # Fit the GMM with the optimal number of clustersz
+        optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
+        optimal_gmm.fit(embedding)
+        labels = optimal_gmm.predict(embedding)
+
+        # Add cluster number label to df dataframe
+        #df.loc[(df.session_ind == session) & (df.event_type == 'mouth or tongue movement'), 'cluster_num'] = labels
+
+        # For speed, only create individual session plots for the first iteration
+        if i == 0:
+            # Plot the UMAP projections with optimal GMM clusters, using the custom colormap
+            scatter = plt.scatter(embedding_umap[:, 0], embedding_umap[:, 1], c=labels, cmap=cmap, s=20)
+            plt.title(f'Session {session}: UMAP projection with GMM ({optimal_n_components} clusters)')
+
+            # Customize the colorbar (legend)
+            cbar = plt.colorbar(scatter)
+            cbar.set_ticks([])  # Set specific tick positions
+
+            umap_session_path = os.path.join(umap_dir, f'session_{session}_umap.png')
+            plt.savefig(umap_session_path)
+            plt.clf()
+
+            # Plot BIC values for a range of cluster sizes
+            plt.plot(n_components_range, bic_scores, marker='o')
+            plt.xlabel('Number of clusters')
+            plt.ylabel('BIC')
+            plt.title(f'Session {session}: BIC Scores')
+            bic_session_path = os.path.join(umap_dir, f'session_{session}_bic.png')
+            plt.savefig(bic_session_path)
+            plt.clf()
+
+
+
+## Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
+# Define jitter amount
+jitter_strength = 0.25  # Adjust the strength of jitter as needed
+
+# Add jitter to the session size and optimal clusters
+session_size_jittered = np.array(session_size_list) + np.random.normal(0, jitter_strength, len(session_size_list))
+optimal_cluster_jittered = np.array(optimal_cluster_list) + np.random.normal(0, jitter_strength, len(optimal_cluster_list))
+
+# Make scatter plot
+plt.scatter(session_size_jittered, optimal_cluster_jittered, c='cornflowerblue', marker='o')
+plt.xlabel('Session Size')
+plt.ylabel('Optimal Number of Clusters')
+plt.title(f'Optimal Cluster Number vs Session Size ({iterations} iterations)')
+scatter_plot_path = os.path.join(umap_dir, 'optimal_clusters_vs_session_size.png')
+plt.savefig(scatter_plot_path)
+plt.show()
+    
+## Histogram of ditribution of optimal cluster sizes across all iterations
+mode_result = stats.mode(optimal_cluster_list, keepdims=False)
+print(f"The mode is: {mode_result[0]}")
+    
+plt.hist(optimal_cluster_list, bins=len(n_components_range), 
+         color='cornflowerblue', 
+         edgecolor='black')
+plt.axvline(x=mode_result[0]+0.3, 
+            color='red', 
+            linestyle='--', 
+            linewidth=2)
+plt.xlabel('Optimal Number of Clusters')
+plt.ylabel('Frequency')
+plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
+histogram_path = os.path.join(umap_dir, 'optimal_clusters_histogram.png')
+plt.savefig(histogram_path)
+plt.show()
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+# %% # Assign cluster numbers to events and save new dataframe
+# ==============================================================================
+# Assign cluster numbers to events and save new dataframe
+# ==============================================================================
+# Assign '0' to cluster_num for events where event_type is 'no movement'
+df.loc[df['event_type'] == 'no movement', 'cluster_num'] = -2
+
+# Assign '-1' to cluster_num for events where event_type is 'gape'
+df.loc[df['event_type'] == 'gape', 'cluster_num'] = -1
+
+
+## Save the new dataframe into a pickle file
+output_file_path = os.path.join(dirname, 'clustering_df_update.pkl')
+df.to_pickle(output_file_path)
+
+print(f"DataFrame successfully saved to {output_file_path}")
+
+
+
+# %% # Extra crap I think I can delete
+# ==============================================================================
+# Extra crap I think I can delete
+# ==============================================================================
 '''
-
-
 # UMAP with GMM on a session-by-session basis
 for session in df.session_ind.unique():
     #if session == 0:
@@ -254,79 +927,7 @@ df.to_pickle(output_file_path)
 
 print(f"DataFrame successfully saved to {output_file_path}")
 
-
-
-
-
-import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
-import os
-
-# Define the custom colormap
-custom_colors = ['#4285F4', '#88498F', '#0CBABA'] #08605F']
-cmap = ListedColormap(custom_colors)
-
-# UMAP with GMM on a session-by-session basis
-for session in df.session_ind.unique():
-    if session == 0:
-        continue
-    for i in range(iterations):
-
-        # Filter data for the current session
-        mtm_session_bool = mtm_df.session_ind == session
-        mtm_session_df = mtm_df.loc[mtm_session_bool].copy()  # Make a copy to avoid SettingWithCopyWarning
-        mtm_session_features = np.stack(mtm_session_df.features.values)
-
-        scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features)  # Scale features
-        embedding = reducer.fit_transform(scaled_mtm_session)  # UMAP embedding
-
-        # Determine the optimal number of clusters using BIC
-        bic_scores = []
-        for n_components in n_components_range:
-            gmm = GaussianMixture(n_components=n_components, random_state=42)
-            gmm.fit(embedding)
-            bic = gmm.bic(embedding)
-            bic_scores.append(bic)
-
-        # Find the number of components with the lowest BIC
-        #optimal_n_components = n_components_range[np.argmin(bic_scores)]
-        optimal_n_components = 3
-        # Store the optimal clusters number and the number of MTMs within a session
-        optimal_cluster_list.append(optimal_n_components)
-        session_size_list.append(len(mtm_session_df))
-
-        # Fit the GMM with the optimal number of clusters
-        optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
-        optimal_gmm.fit(embedding)
-        labels = optimal_gmm.predict(embedding)
-
-        # Add cluster number label to df dataframe
-        #df.loc[(df.session_ind == session) & (df.event_type == 'mouth or tongue movement'), 'cluster_num'] = labels
-
-        # For speed, only create individual session plots for the first iteration
-        if i == 0:
-            # Plot the UMAP projections with optimal GMM clusters, using the custom colormap
-            scatter = plt.scatter(embedding[:, 0], embedding[:, 1], c=labels, cmap=cmap, s=20)
-            plt.title(f'Session {session}: UMAP projection with GMM ({optimal_n_components} clusters)')
-
-            # Customize the colorbar (legend)
-            cbar = plt.colorbar(scatter)
-            cbar.set_ticks([])  # Set specific tick positions
-
-            umap_session_path = os.path.join(umap_dir, f'session_{session}_umap.png')
-            plt.savefig(umap_session_path)
-            plt.clf()
-
-            # Plot BIC values for a range of cluster sizes
-            plt.plot(n_components_range, bic_scores, marker='o')
-            plt.xlabel('Number of clusters')
-            plt.ylabel('BIC')
-            plt.title(f'Session {session}: BIC Scores')
-            bic_session_path = os.path.join(umap_dir, f'session_{session}_bic.png')
-            plt.savefig(bic_session_path)
-            plt.clf()
-
-
+'''
 
 
 

@@ -4,6 +4,10 @@
 Created on Tue Dec 17 15:13:11 2024
 
 @author: natasha
+
+This script will overwrie the original data file and remove any multimodal waveforms.
+Save a backup of your raw data first.
+
 """
 
 import numpy as np
