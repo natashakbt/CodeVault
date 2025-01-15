@@ -17,7 +17,8 @@ import umap
 import glob
 from scipy import stats
 from sklearn.cluster import KMeans
-
+import piecewise_regression
+from scipy.spatial.distance import mahalanobis
 
 # ==============================================================================
 # Load data and get setup
@@ -58,7 +59,7 @@ mtm_features = np.stack(mtm_df.features.values)
 
 # UMAP dimmentionality reduction and feature scaling
 reducer = umap.UMAP()
-n_components_range = range(1, 15)  # Define a range of cluster numbers to test
+n_components_range = list(range(1, 15))  # Define a range of cluster numbers to test
 scaled_mtm_features = StandardScaler().fit_transform(mtm_features) # Scale features
 embedding = reducer.fit_transform(scaled_mtm_features) # UMAP embedding
 
@@ -103,6 +104,34 @@ plt.clf()
 fixed_cluster_num = np.nan
 iterations = 1 # Number of times to repeat UMAP reduction
 
+
+# %% Define functions
+# ==============================================================================
+# Important inputs for UMAP of individual sessions
+# ==============================================================================
+
+def calc_mahalanobis_distance_matrix(mtm_session_df):
+    cluster_labels = np.unique(mtm_session_df.cluster_num)
+    mahal_matrix = np.zeros((len(cluster_labels), len(cluster_labels)))
+    full_features = mtm_session_df.scaled_features
+    for i, clust_i in enumerate(cluster_labels):
+        for j, clust_j in enumerate(cluster_labels):
+            this_clust_idx = mtm_session_df.index[np.where(mtm_session_df.cluster_num == clust_i)[0]]
+            this_cluster_data = full_features.loc[this_clust_idx]
+            if len(this_cluster_data) > 2:
+                this_cluster_mean = np.mean(this_cluster_data, axis = 0)
+                this_cluster_cov = np.cov(this_cluster_data) # TODO: THIS PART IS NOT WORKING
+                inv_cov = np.linalg.pinv(this_cluster_cov)
+                
+                other_clust_idx = mtm_session_df.index[np.where(mtm_session_df.cluster_num == clust_j)[0]]
+                other_cluster_data = full_features.loc[other_clust_idx]
+                mahal_list = [
+                    mahalanobis(x, this_cluster_mean, inv_cov) \
+                        for x in other_cluster_data
+                        ]
+                mahal_matrix[i,j] = np.mean(mahal_list)
+            else:
+                print("something went wrong")
 
 
 # %% # Run GMM on UMAP of MTMs in individual sessions (OG)
@@ -232,7 +261,7 @@ plt.savefig(histogram_path)
 plt.show()
     
 
-#%%
+#%% # Run GMM on UMAP/PCA of MTMs in individual sessions
 # ==============================================================================
 # Run GMM on UMAP/PCA of MTMs in individual sessions
 # ==============================================================================
@@ -525,15 +554,17 @@ session_size_list = []
 pca_dimmensions = []
 
 mtm_df['cluster_num'] = np.nan
+mtm_df['scaled_features'] = np.nan
 
 if fixed_cluster_num == 3:
     custom_colors = ['#4285F4', '#88498F', '#0CBABA']
     cmap = ListedColormap(custom_colors)
-elif fixed_cluster_num == 4:
-    custom_colors = ['#4285F4', '#88498F', '#0CBABA', '#08605F']
-    cmap = ListedColormap(custom_colors)
+#elif fixed_cluster_num == 4:
 else:
-    cmap = 'viridis'
+    custom_colors = ['#4285F4', '#88498F', '#08605F', '#0CBABA',  '#B0B0B0']
+    cmap = ListedColormap(custom_colors)
+#else:
+#    cmap = 'inferno'
 
 # UMAP with GMM on a session-by-session basis
 for session in df.session_ind.unique():
@@ -544,16 +575,15 @@ for session in df.session_ind.unique():
         mtm_session_bool = mtm_df.session_ind == session
         mtm_session_df = mtm_df.loc[mtm_session_bool].copy()  # Make a copy to avoid SettingWithCopyWarning
         mtm_session_features = np.stack(mtm_session_df.features.values)
-
         scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features)  # Scale features
-
+        
+        mtm_session_df['scaled_features'] = list(scaled_mtm_session) # ADDED FOR MAHAL DIST
+        
         pca = PCA(n_components=0.9)
         embedding = pca.fit_transform(scaled_mtm_session)
-        
         pca_dimmensions.append(embedding.shape[1])
         
         embedding_umap = reducer.fit_transform(scaled_mtm_session)  # UMAP embedding of PCA - for plotting
-        
         
         # Determine the optimal number of clusters using BIC
         bic_scores = []
@@ -562,14 +592,17 @@ for session in df.session_ind.unique():
             gmm.fit(embedding)
             bic = gmm.bic(embedding)
             bic_scores.append(bic)
-
-        # TODO: ADD SEGMENTED REGRESSION ON BIC TO FIND ELBOW. DON'T RELY ON MINIMUM VALUE
-        if np.isnan(fixed_cluster_num): # Find the number of components with the lowest BIC
-            optimal_n_components = n_components_range[np.argmin(bic_scores)]
+        
+        # Find the optimal cluster number by looking for the elbow in the BIC values
+        if np.isnan(fixed_cluster_num):
+            pw_fit = piecewise_regression.Fit(n_components_range, bic_scores, n_breakpoints=1)
+            pw_results = pw_fit.get_results()
+            breakpoint1 = pw_results["estimates"]["breakpoint1"]["estimate"]
+            optimal_n_components = round(breakpoint1)
         else:
             optimal_n_components = fixed_cluster_num
         # Store the optimal clusters number and the number of MTMs within a session
-        optimal_cluster_list.append(optimal_n_components)
+        optimal_cluster_list.append(breakpoint1)
         session_size_list.append(len(mtm_session_df))
 
         # Fit the GMM with the optimal number of clustersz
@@ -579,12 +612,14 @@ for session in df.session_ind.unique():
 
         # Add cluster number label to df dataframe
         #df.loc[(df.session_ind == session) & (df.event_type == 'mouth or tongue movement'), 'cluster_num'] = labels
-
+        
+        mtm_session_df['cluster_num'] = labels # ADDED FOR MAHAL DIST
+        
         # For speed, only create individual session plots for the first iteration
         if i == 0:
             # Plot the UMAP projections with optimal GMM clusters, using the custom colormap
             scatter = plt.scatter(embedding_umap[:, 0], embedding_umap[:, 1], c=labels, cmap=cmap, s=20)
-            plt.title(f'Session {session}: UMAP projection with GMM ({optimal_n_components} clusters)')
+            plt.title(f'Session {session}: UMAP projection of PCA with GMM ({optimal_n_components} clusters)')
 
             # Customize the colorbar (legend)
             cbar = plt.colorbar(scatter)
@@ -595,10 +630,16 @@ for session in df.session_ind.unique():
             plt.clf()
 
             # Plot BIC values for a range of cluster sizes
-            plt.plot(n_components_range, bic_scores, marker='o')
+            #plt.plot(n_components_range, bic_scores, marker='o')
+            
+            # Plot the data, fit, breakpoints and confidence intervals
+            pw_fit.plot_fit(color="red", linewidth=1)
+            pw_fit.plot_data(marker = 'o', s = 60)
+            pw_fit.plot_breakpoints()
+            pw_fit.plot_breakpoint_confidence_intervals()
             plt.xlabel('Number of clusters')
-            plt.ylabel('BIC')
-            plt.title(f'Session {session}: BIC Scores')
+            plt.ylabel('BIC Score')
+            plt.title(f'Session {session}: BIC Scores. Elbow at {round(breakpoint1,3)}')
             bic_session_path = os.path.join(umap_dir, f'session_{session}_bic.png')
             plt.savefig(bic_session_path)
             plt.clf()
@@ -607,7 +648,7 @@ for session in df.session_ind.unique():
 
 ## Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
 # Define jitter amount
-jitter_strength = 0.25  # Adjust the strength of jitter as needed
+jitter_strength = 0.05  # Adjust the strength of jitter as needed
 
 # Add jitter to the session size and optimal clusters
 session_size_jittered = np.array(session_size_list) + np.random.normal(0, jitter_strength, len(session_size_list))
