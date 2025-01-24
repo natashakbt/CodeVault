@@ -55,6 +55,7 @@ multi_segments = []
 uni_segments = []
 
 for index, row in mtm_df_all.iterrows():
+#for index, row in mtm_df_all.head(10).iterrows(): # Use to plot a few uni/multimodal waveforms
     segment = row['segment_raw']
     corr = signal.correlate(segment, segment) # Correlate segment against itself
     lags = signal.correlation_lags(len(segment), len(segment))
@@ -65,24 +66,27 @@ for index, row in mtm_df_all.iterrows():
     # Put categorized segments into respective lists
     # Add 'yes' or 'no' value to 'multimodal' column
     if len(corr_peaks) > 0:
-        multi_segments.append(row['segment_norm_interp'])
+        multi_segments.append(row['segment_raw'])
         df.loc[index, 'multimodal'] = 'yes' 
     else:
-        uni_segments.append(row['segment_norm_interp'])
+        uni_segments.append(row['segment_raw'])
         df.loc[index, 'multimodal'] = 'no'
     
     ## Use code below to plot each waveform and its cross-correlation. 
     ## WARNING: So many waveforms that it takes hours and then crashes 
-    #fig, (ax_seg, ax_corr) = plt.subplots(2,1, figsize=(7,10))
-    #ax_seg.plot(row['segment_raw'])
-    #if len(corr_peaks) > 0:
-    #    ax_corr.plot(pos_corr, color='red')
-    #else:
-    #    ax_corr.plot(pos_corr)
-    #ax_corr.plot(corr_peaks, pos_corr[corr_peaks], "x", markersize=20)
-
+    '''
+    fig, (ax_seg, ax_corr) = plt.subplots(2,1, figsize=(7,10))
+    ax_seg.plot(row['segment_raw'])
+    if len(corr_peaks) > 0:
+        ax_corr.plot(pos_corr, color='red')
+    else:
+        ax_corr.plot(pos_corr)
+    ax_corr.plot(corr_peaks, pos_corr[corr_peaks], "x", markersize=20)
+    '''
+    
 # Overwrite data without multimodal segments
 df_filter_multimodal = df[df['multimodal'] != 'yes'] # Remove multimodal from df
+#df_filter_multimodal = df
 df_filter_multimodal.to_pickle(file_path) # Overwrite and save dataset
 
 
