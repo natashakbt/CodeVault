@@ -24,8 +24,8 @@ from scipy.spatial.distance import mahalanobis
 # Load data and get setup
 # ==============================================================================
 dirname = '/home/natasha/Desktop/clustering_data/'
-#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only labeled stuff?
-file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') #everything with predictions?
+#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only events labelled by video scoring
+file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
 df = pd.read_pickle(file_path)
 df = df.rename(columns={'pred_event_type': 'event_type'})
 
@@ -101,7 +101,7 @@ plt.clf()
 # Important inputs for UMAP of individual sessions
 # ==============================================================================
 #fixed_cluster_num = np.nan
-fixed_cluster_num = np.nan
+fixed_cluster_num = 3
 iterations = 1 # Number of times to repeat UMAP reduction
 
 
@@ -180,8 +180,8 @@ else:
 
 # UMAP with GMM on a session-by-session basis
 for session in df.session_ind.unique():
-    if session == 0:
-        continue
+    #if session == 0:
+    #    continue
     for i in range(iterations):
         # Filter data for the current session
         mtm_session_bool = mtm_df.session_ind == session
@@ -211,10 +211,12 @@ for session in df.session_ind.unique():
             pw_results = pw_fit.get_results()
             breakpoint1 = pw_results["estimates"]["breakpoint1"]["estimate"]
             optimal_n_components = round(breakpoint1)
+            optimal_cluster_list.append(breakpoint1)
         else:
             optimal_n_components = fixed_cluster_num
+            optimal_cluster_list.append(fixed_cluster_num)
         # Store the optimal clusters number and the number of MTMs within a session
-        optimal_cluster_list.append(breakpoint1)
+
         session_size_list.append(len(mtm_session_df))
 
         # Fit the GMM with the optimal number of clustersz
@@ -223,7 +225,11 @@ for session in df.session_ind.unique():
         labels = optimal_gmm.predict(embedding)
 
         # Add cluster number label to df dataframe
-        #df.loc[(df.session_ind == session) & (df.event_type == 'mouth or tongue movement'), 'cluster_num'] = labels
+        df.loc[(df.session_ind == session) & (df.event_type == 'MTMs'), 'cluster_num'] = labels
+        
+        test = df.loc[(df.session_ind == session) & (df.event_type == 'MTMs'), 'cluster_num']
+        print(sum(np.isnan(test)))
+        
         
         mtm_session_df['cluster_num'] = labels 
         mahal_matrix = calc_mahalanobis_distance_matrix(mtm_session_df)
@@ -245,18 +251,19 @@ for session in df.session_ind.unique():
             umap_session_path = os.path.join(pca_dir, f'session_{session}_umap-of-PCA.png')
             plt.savefig(umap_session_path)
             plt.clf()
-
-            # Plot the BIC values, linear regressions, and breakpoint with confidence intervals
-            pw_fit.plot_fit(color="red", linewidth=1)
-            pw_fit.plot_data(marker = 'o', s = 60)
-            pw_fit.plot_breakpoints()
-            pw_fit.plot_breakpoint_confidence_intervals()
-            plt.xlabel('Number of clusters')
-            plt.ylabel('BIC Score')
-            plt.title(f'Session {session}: BIC Scores. Elbow at {round(breakpoint1,3)}')
-            bic_session_path = os.path.join(pca_dir, f'session_{session}_bic.png')
-            plt.savefig(bic_session_path)
-            plt.clf()
+            
+            if np.isnan(fixed_cluster_num):
+                # Plot the BIC values, linear regressions, and breakpoint with confidence intervals
+                pw_fit.plot_fit(color="red", linewidth=1)
+                pw_fit.plot_data(marker = 'o', s = 60)
+                pw_fit.plot_breakpoints()
+                pw_fit.plot_breakpoint_confidence_intervals()
+                plt.xlabel('Number of clusters')
+                plt.ylabel('BIC Score')
+                plt.title(f'Session {session}: BIC Scores. Elbow at {round(breakpoint1,3)}')
+                bic_session_path = os.path.join(pca_dir, f'session_{session}_bic.png')
+                plt.savefig(bic_session_path)
+                plt.clf()
             
             # Plot the mahalanobis matrix
             fig, ax = plt.subplots()

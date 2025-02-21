@@ -14,7 +14,8 @@ import glob
 from scipy.stats import chi2_contingency
 import seaborn as sns
 from matplotlib.legend_handler import HandlerTuple
-
+import shutil
+from scipy.interpolate import make_interp_spline
 
 
 # ==============================================================================
@@ -24,19 +25,20 @@ dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
 
-transition_file_path = os.path.join(dirname, 'scaled_mode_tau.pkl')
+transition_file_path = os.path.join(dirname, 'scaled_mode_tau_cut.pkl')
 transition_df = pd.read_pickle(transition_file_path)
 
 # Remove any data for df that does not have an associated transition time in scaled_mode_tau
 df['basename'] = df['basename'].str.lower() # All basenames to lowercase
 transition_df['basename'] = transition_df['basename'].str.lower() # All basenames to lowercase
+transition_df = transition_df.rename(columns={'taste': 'taste_num'}) # NEW changed column name.
 tau_basenames = transition_df.basename.unique() # Find all basenames in transition_df
 df = df.loc[df['basename'].isin(tau_basenames)] # Keep only basenames 
 # Manually removed this sepcific data:
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
 
-window_len = 800
+window_len = 400
 
 
 
@@ -53,7 +55,7 @@ def assign_pal_taste(row):
 
 
 
-
+# %% 
 # ==============================================================================
 # Re-structure transition dataframe
 # Create DataFrame of events around the transition
@@ -110,7 +112,11 @@ for i in range(len(expanded_df)):
         window_end = transition_time_point + window_len
         #print(window_start, window_end)
         if window_start <= segment_bounds[0] <= window_end and window_start <= segment_bounds[1] <= window_end:
-            rows.append(row)
+            new_row = row.copy()  # Copy row to modify it safely
+            new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, segment_bounds[1] - window_start) # Alter segment time to be from trial start
+            rows.append(new_row)
+            
+            #rows.append(row)
             
 # Create a DataFrame from the list of rows
 transition_events_df = pd.DataFrame(rows).reset_index(drop=True)
@@ -125,21 +131,32 @@ color_mapping = {
      2: '#0CBABA'        # Color for cluster 3
 }
 
+# Group by basename (session), taste, and trial
+grouped = transition_events_df.groupby(['basename', 'taste', 'trial'])
+
 
 # ==============================================================================
-# Plot events around the transition, 1 plot per trial
+# Plot EMG waveforms with behavior label around the transition, 1 plot per trial
 # ==============================================================================
 # Find unique combinations of trial, taste, and session_ind
 unique_combinations = transition_events_df.groupby(['trial', 'taste', 'basename'])
 
 emg_dir = os.path.join(dirname, 'EMG_around_transition')
 os.makedirs(emg_dir, exist_ok=True)
-
-# Clear the folder by deleting all files within it
-files = glob.glob(os.path.join(emg_dir, '*'))  # Get list of all files in the directory
-for file in files:
+'''
+# Clear the folder by deleting all files within it -> code doesn't work?
+dirs_list = glob.glob(os.path.join(emg_dir, '*'))  # Get list of all files in the directory
+for file in dirs_list:
     os.remove(file)  # Remove each file
-
+'''
+# Remove everything in emg_dir
+for item in os.listdir(emg_dir):  # List everything inside the directory
+    item_path = os.path.join(emg_dir, item)
+    if os.path.isfile(item_path):
+        os.remove(item_path)  # Delete file
+    elif os.path.isdir(item_path):
+        shutil.rmtree(item_path)  # Delete subdirectory and its contents
+        
 # =============================================================================
 #transition_events_df['event_type'] = transition_events_df['event_type'].astype('category')
 #transition_events_df['pred_event_code'] = transition_events_df.event_type.cat.codes
@@ -148,10 +165,8 @@ for file in files:
 #cmap = plt.cm.get_cmap('tab10')
 # =============================================================================
 
-# Group by basename (session), taste, and trial
-grouped = transition_events_df.groupby(['basename', 'taste', 'trial'])
 
-
+# %% EMG WAVEFORMS AROUND TRANSITION
 for (basename, taste, trial), group in grouped:
     basename_dir = os.path.join(emg_dir, basename)
     os.makedirs(basename_dir, exist_ok=True)  # Ensure the folder is created
@@ -205,8 +220,9 @@ for (basename, taste, trial), group in grouped:
     plt.title(f"Waveforms for Trial {trial}, Taste {taste}, {basename}")
     plt.xlabel('Time (ms)')
     plt.ylabel('Waveform Amplitude')
-    plt.legend()
-    
+    #plt.legend()
+    #plt.legend(["Legend Label"])
+    plt.plot()
     # Save the plot
     #emg_all_path = os.path.join(emg_dir, f'trial{trial}_taste{taste}_{basename}_emg.png')
     #plt.savefig(emg_all_path)
@@ -215,9 +231,9 @@ for (basename, taste, trial), group in grouped:
     plt.savefig(emg_all_path)
     plt.clf()
 
-
+# %% BEHAVIOR RASTER PLOT
 # ==============================================================================
-# Plot events around the transition, 1 plot per trial
+# Raster plot of events around the transition, 1 plot per session per taste
 # ==============================================================================
 
 clust_dir = os.path.join(dirname, 'cluster_raster_transition')
@@ -308,7 +324,7 @@ for basename, taste_group in grouped:
     plt.savefig(clust_all_path)
     plt.clf()
 
-
+# %% # CHISQUARED ANALYSIS
 # ==============================================================================
 # Chi-squared test
 # ==============================================================================
@@ -410,9 +426,66 @@ plt.xlim([-1, 2])
 plt.show()
 
 
+# %% FREQUENCY PLOTS
+
+freq_dir = os.path.join(dirname, 'frequency_of_behaviors')
+os.makedirs(clust_dir, exist_ok=True)
+
+# Clear the folder by deleting all files within it
+files = glob.glob(os.path.join(freq_dir, '*'))
+for file in files:
+    os.remove(file)  # Remove each file
 
 
+# Group by basename (session) and taste
+grouped = transition_events_df.groupby(['basename', 'taste'])
+unique_clust_num = transition_events_df['cluster_num'].unique()
 
+from scipy.ndimage import gaussian_filter1d  # for smoothing
+
+
+# Create a figure and populate the dictionary
+for basename, taste_group in grouped:
+    behavior_array = np.zeros((len(unique_clust_num), (window_len*2))) # Initialize list to keep track of behavioral occurances
+    
+    for row in taste_group.itertuples():
+        cluster_num = row.cluster_num 
+        start_idx, end_idx = row.time_from_trial_start  # Access start and end as attributes
+        
+        # Ensure we correctly find the cluster index
+        cluster_idx = np.where(unique_clust_num == cluster_num)[0]
+
+        behavior_array[cluster_idx, start_idx:end_idx + 1] += 1
+
+   # Plot each row of the behavior array
+    plt.figure(figsize=(10, 6))
+    for i in range(behavior_array.shape[0]):
+        cluster_num = unique_clust_num[i]
+        
+        # Skip cluster -2.0 (no movement)
+        if cluster_num == -2.0:
+            continue
+        
+        # Get the color for the cluster from the mapping
+        cluster_color = color_mapping.get(unique_clust_num[i], '#000000')  # Default to black if cluster not in mapping
+        
+        # Smooth the line using a Gaussian filter (you can change the sigma for more/less smoothing)
+        smoothed_line = gaussian_filter1d(behavior_array[i, :], sigma=2)
+
+        # Plot the smoothed line with the cluster color
+        plt.plot(smoothed_line, label=f'Cluster {unique_clust_num[i]}', color=cluster_color)
+    
+    plt.title(f'{basename[0]} - {taste_group["taste_name"].iloc[0]}')
+    plt.xlabel('Time (in ms; mid-point is transition)')
+    plt.ylabel('Occurrences')
+    plt.axvline(x=window_len, color='k', ls='--')
+    plt.legend()
+    plt.show()
+
+        
+
+# %% 
+# TODO: FIGURE OUT WHAT ALL THIS CRAP BELOW IS DOING. DO I NEED IT?
 
 
 '''

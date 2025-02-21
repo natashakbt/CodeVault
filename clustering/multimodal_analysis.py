@@ -86,7 +86,7 @@ for index, row in mtm_df_all.iterrows():
     
 # Overwrite data without multimodal segments
 df_filter_multimodal = df[df['multimodal'] != 'yes'] # Remove multimodal from df
-#df_filter_multimodal = df
+#df_filter_multimodal = df # Un-comment this line to NOT remove multimodal waveforms from dataframe.
 df_filter_multimodal.to_pickle(file_path) # Overwrite and save dataset
 
 
