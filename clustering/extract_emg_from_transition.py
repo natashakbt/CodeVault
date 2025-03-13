@@ -12,11 +12,14 @@ import os
 import matplotlib.pyplot as plt
 import glob
 from scipy.stats import chi2_contingency
+from scipy.stats import zscore
 import seaborn as sns
 from matplotlib.legend_handler import HandlerTuple
 import shutil
-from scipy.interpolate import make_interp_spline
-
+from scipy.interpolate import make_interp_spline, BSpline
+from scipy.ndimage import gaussian_filter1d  # for smoothing
+from scipy.optimize import curve_fit
+import piecewise_regression
 
 # ==============================================================================
 # Load data and get setup
@@ -53,9 +56,12 @@ def assign_pal_taste(row):
         return -1
 
 
+def sigmoid(x, L ,x0, k, b):
+    y = L / (1 + np.exp(-k*(x-x0))) + b
+    return (y)
 
 
-# %% 
+# %% IMPORTANT DATAFRAME SETUP
 # ==============================================================================
 # Re-structure transition dataframe
 # Create DataFrame of events around the transition
@@ -66,7 +72,7 @@ taste_num_list = []
 trial_num_list = []
 scaled_mode_tau_list = []
 
-chosen_transition = 2 # Choose out of 0, 1, or 2
+chosen_transition = 1 # Choose out of 0, 1, or 2
 
 # Iterate over each row in the original dataframe
 for i, row in transition_df.iterrows():
@@ -108,6 +114,7 @@ for i in range(len(expanded_df)):
             (expanded_df['basename'] == basename), 
             'scaled_mode_tau'
         ].values[0]
+        transition_time_point = 0 # to align to taste delivery
         window_start = transition_time_point - window_len
         window_end = transition_time_point + window_len
         #print(window_start, window_end)
@@ -115,12 +122,26 @@ for i in range(len(expanded_df)):
             new_row = row.copy()  # Copy row to modify it safely
             new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, segment_bounds[1] - window_start) # Alter segment time to be from trial start
             rows.append(new_row)
-            
-            #rows.append(row)
+        elif window_start <= segment_bounds[1] <= window_end:
+            new_row = row.copy()
+            new_row['segment_bounds'] = (window_start, segment_bounds[1])
+            new_row['time_from_trial_start'] = (0, segment_bounds[1] - window_start)
+            cut_idx = window_start - segment_bounds[0]
+            new_row['segment_raw'] = row['segment_raw'][cut_idx:]
+            rows.append(new_row)
+        elif window_start <= segment_bounds[0] <= window_end:
+            new_row = row.copy()
+            new_row['segment_bounds'] = (segment_bounds[0], window_end)
+            new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, window_len*2)
+            cut_idx = window_end - segment_bounds[0]
+            new_row['segment_raw'] = row['segment_raw'][:cut_idx]
+            rows.append(new_row)
+
+
             
 # Create a DataFrame from the list of rows
 transition_events_df = pd.DataFrame(rows).reset_index(drop=True)
-
+transition_events_df = transition_events_df.drop(columns = ['segment_norm_interp'])
 
 # Define a color mapping for cluster numbers
 color_mapping = {
@@ -347,6 +368,10 @@ summary_pivot.drop(columns=['taste'], inplace=True)
 
 collapsed_summary = summary_pivot.groupby(['basename', 'cluster_num', 'pal_taste'], as_index=False).sum()
 
+# TODO: REMOVE NO MOVEMENT
+collapsed_summary = collapsed_summary[collapsed_summary['cluster_num'] != -2.0]
+
+
 # Create a pivot table to ensure 'before' and 'after' values are aligned by 'cluster_num'
 pivoted_df = collapsed_summary.pivot(index=['basename', 'pal_taste'], columns='cluster_num', values=['before', 'after']).fillna(0)
 
@@ -396,8 +421,6 @@ plt.xlim([-1, 2]) # Set x-axis limits
 plt.show()
 
 
-
-
 # Color indicates basename
 # Plotting Chi-Squared test and bar graph of behavior frequency before/after 
 plt.figure(figsize=(6, 8))
@@ -428,63 +451,171 @@ plt.show()
 
 # %% FREQUENCY PLOTS
 
+
+
 freq_dir = os.path.join(dirname, 'frequency_of_behaviors')
-os.makedirs(clust_dir, exist_ok=True)
+os.makedirs(freq_dir, exist_ok=True)
 
 # Clear the folder by deleting all files within it
 files = glob.glob(os.path.join(freq_dir, '*'))
 for file in files:
     os.remove(file)  # Remove each file
-
+    
 
 # Group by basename (session) and taste
 grouped = transition_events_df.groupby(['basename', 'taste'])
 unique_clust_num = transition_events_df['cluster_num'].unique()
 
-from scipy.ndimage import gaussian_filter1d  # for smoothing
 
 
-# Create a figure and populate the dictionary
 for basename, taste_group in grouped:
-    behavior_array = np.zeros((len(unique_clust_num), (window_len*2))) # Initialize list to keep track of behavioral occurances
+    behavior_array = np.zeros((len(unique_clust_num), (window_len * 2)))  # Initialize behavior array
     
     for row in taste_group.itertuples():
-        cluster_num = row.cluster_num 
-        start_idx, end_idx = row.time_from_trial_start  # Access start and end as attributes
+        cluster_num = row.cluster_num
+        start_idx, end_idx = row.time_from_trial_start
         
-        # Ensure we correctly find the cluster index
+        # Find index of the cluster
         cluster_idx = np.where(unique_clust_num == cluster_num)[0]
 
         behavior_array[cluster_idx, start_idx:end_idx + 1] += 1
 
-   # Plot each row of the behavior array
-    plt.figure(figsize=(10, 6))
+    num_clusters = len(unique_clust_num[unique_clust_num != -2.0])  # Exclude cluster -2.0
+    fig, axes = plt.subplots(num_clusters, 1, figsize=(10, 3 * num_clusters), sharex=True)
+    
+    if num_clusters == 1:  # If there's only one subplot, put it in a list for consistent indexing
+        axes = [axes]
+    
+    subplot_idx = 0
     for i in range(behavior_array.shape[0]):
         cluster_num = unique_clust_num[i]
+
+        if cluster_num == -2.0:  # Skip cluster -2.0 (no movement)
+            continue
+
+        cluster_color = color_mapping.get(cluster_num, '#000000')  # Default to black if missing
+
+        smoothed_line = gaussian_filter1d(behavior_array[i, :], sigma=2)
+
+        axes[subplot_idx].plot(smoothed_line, label=f'Cluster {cluster_num}', color=cluster_color)
+        axes[subplot_idx].axvline(x=window_len, color='k', ls='--')
+        axes[subplot_idx].set_ylabel('Occurrences')
+        axes[subplot_idx].legend()
+        subplot_idx += 1
+
+    axes[-1].set_xlabel('Time (in ms; mid-point is transition)')
+    fig.suptitle(f'{basename[0]} - {taste_group["taste_name"].iloc[0]}', fontsize=14)
+    plt.tight_layout()
+
+    freq_all_path = os.path.join(freq_dir, f'{taste_group["taste_name"].iloc[0]}_{basename[0]}.png')
+    plt.savefig(freq_all_path)
+    plt.clf()
+
+
+
+
+# Z-scored values
+for basename, taste_group in grouped:
+    behavior_array = np.zeros((len(unique_clust_num), (window_len * 2)))  # Initialize occurrence tracking array
+
+    for row in taste_group.itertuples():
+        cluster_num = row.cluster_num
+        start_idx, end_idx = row.time_from_trial_start  # Access start and end
         
+        # Ensure we correctly find the cluster index
+        cluster_idx = np.where(unique_clust_num == cluster_num)[0]
+
+        behavior_array[cluster_idx, start_idx:end_idx + 1] += 1  # Increment occurrences
+
+    # Compute z-score across time for each cluster
+    behavior_array_z = np.apply_along_axis(zscore, 1, behavior_array, nan_policy='omit')
+
+    # Plot each row of the z-scored behavior array
+    #plt.figure(figsize=(10, 6))
+    
+    fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
+    plot_idx = 0
+    
+    for i in range(behavior_array_z.shape[0]):
+        cluster_num = unique_clust_num[i]
+
         # Skip cluster -2.0 (no movement)
         if cluster_num == -2.0:
             continue
-        
-        # Get the color for the cluster from the mapping
-        cluster_color = color_mapping.get(unique_clust_num[i], '#000000')  # Default to black if cluster not in mapping
-        
-        # Smooth the line using a Gaussian filter (you can change the sigma for more/less smoothing)
-        smoothed_line = gaussian_filter1d(behavior_array[i, :], sigma=2)
 
-        # Plot the smoothed line with the cluster color
-        plt.plot(smoothed_line, label=f'Cluster {unique_clust_num[i]}', color=cluster_color)
+        # Get the color for the cluster from the mapping
+        cluster_color = color_mapping.get(cluster_num, '#000000')  # Default to black if cluster not in mapping
+        
+        
+        x_values = np.arange(behavior_array_z.shape[1])  # Time indices
+        y_values = behavior_array_z[i, :]
+        
+        # Fit piecewise linear regression
+        pw_fit = piecewise_regression.Fit(x_values, y_values, n_breakpoints=2)
+        pw_results = pw_fit.get_results()
+
+        '''
+        # Fit sigmoid
+        try:
+            #  L = amp ,x0 = middle, k = slope, b = offset
+            p0 = [max(y_values), np.median(x_values),1,0] # this is an mandatory initial guess
     
-    plt.title(f'{basename[0]} - {taste_group["taste_name"].iloc[0]}')
+            popt, pcov = curve_fit(
+                sigmoid, x_values[::10], y_values[::10], p0, 
+                method='dogbox', maxfev = 5000)
+            fitted_y = sigmoid(x_values, *popt)  # Generate fitted values
+    
+            # Plot fitted curve
+            axes[plot_idx].plot(x_values, fitted_y, color=cluster_color, linestyle='-', linewidth=2, alpha=0.9, label=f'Fit Cluster {cluster_num}')
+        except RuntimeError:
+            print("Runtime Error skip")
+        '''
+        
+        # Plot individual data points
+        #pw_fit.plot_fit(ax=axes[plot_idx], color="red", linewidth=1)
+        axes[plot_idx].scatter(x_values, y_values, color=cluster_color, alpha=0.7, s=10, label=f'Cluster {cluster_num}')
+        axes[plot_idx].axvline(x=window_len, color='k', ls='--')
+        axes[plot_idx].set_ylabel('Z-score')
+        axes[plot_idx].legend()
+        plt.sca(axes[plot_idx])  # Set the current axes
+        pw_fit.plot_fit(color="red", linewidth=1)
+        
+        plot_idx += 1
+        
+        '''
+        # Smooth the line using a Gaussian filter
+        smoothed_line = gaussian_filter1d(behavior_array_z[i, :], sigma=5)
+
+        # Plot the smoothed z-score line
+        #plt.plot(smoothed_line, label=f'Cluster {cluster_num}', color=cluster_color)
+
+
+        # Plot in its own subplot
+        axes[plot_idx].plot(smoothed_line, label=f'Cluster {cluster_num}', color=cluster_color)
+        axes[plot_idx].axvline(x=window_len, color='k', ls='--')
+        axes[plot_idx].set_ylabel('Z-score')
+        axes[plot_idx].legend()
+        
+        plot_idx += 1
+        '''
     plt.xlabel('Time (in ms; mid-point is transition)')
-    plt.ylabel('Occurrences')
+    plt.ylabel('Z-scored Occurrences')
     plt.axvline(x=window_len, color='k', ls='--')
     plt.legend()
-    plt.show()
+    plt.suptitle(f'Z-score: {basename[0]} - {taste_group["taste_name"].iloc[0]}')
+    plt.tight_layout()
+    #plt.show()
+    # Save the plot
+    freq_all_path = os.path.join(freq_dir, f'zscore_{taste_group["taste_name"].iloc[0]}_{basename[0]}.png')
+    plt.savefig(freq_all_path)
+    plt.clf()
 
-        
 
-# %% 
+
+
+# %% Test before/after
+
+# %% WHAT IS THIS CRAP
 # TODO: FIGURE OUT WHAT ALL THIS CRAP BELOW IS DOING. DO I NEED IT?
 
 

@@ -24,8 +24,8 @@ from scipy.spatial.distance import mahalanobis
 # Load data and get setup
 # ==============================================================================
 dirname = '/home/natasha/Desktop/clustering_data/'
-#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only events labelled by video scoring
-file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
+file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only events labelled by video scoring
+#file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
 df = pd.read_pickle(file_path)
 df = df.rename(columns={'pred_event_type': 'event_type'})
 
