@@ -41,7 +41,7 @@ df = df.loc[df['basename'].isin(tau_basenames)] # Keep only basenames
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
 
-window_len = 400
+window_len = 400 # Half of the total window
 
 
 
@@ -114,7 +114,7 @@ for i in range(len(expanded_df)):
             (expanded_df['basename'] == basename), 
             'scaled_mode_tau'
         ].values[0]
-        transition_time_point = 0 # to align to taste delivery
+        #transition_time_point = 0 # to align to taste delivery
         window_start = transition_time_point - window_len
         window_end = transition_time_point + window_len
         #print(window_start, window_end)
@@ -122,6 +122,7 @@ for i in range(len(expanded_df)):
             new_row = row.copy()  # Copy row to modify it safely
             new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, segment_bounds[1] - window_start) # Alter segment time to be from trial start
             rows.append(new_row)
+
         elif window_start <= segment_bounds[1] <= window_end:
             new_row = row.copy()
             new_row['segment_bounds'] = (window_start, segment_bounds[1])
@@ -136,7 +137,6 @@ for i in range(len(expanded_df)):
             cut_idx = window_end - segment_bounds[0]
             new_row['segment_raw'] = row['segment_raw'][:cut_idx]
             rows.append(new_row)
-
 
             
 # Create a DataFrame from the list of rows
@@ -155,7 +155,7 @@ color_mapping = {
 # Group by basename (session), taste, and trial
 grouped = transition_events_df.groupby(['basename', 'taste', 'trial'])
 
-
+# %% EMG WAVEFORMS AROUND TRANSITION
 # ==============================================================================
 # Plot EMG waveforms with behavior label around the transition, 1 plot per trial
 # ==============================================================================
@@ -164,12 +164,7 @@ unique_combinations = transition_events_df.groupby(['trial', 'taste', 'basename'
 
 emg_dir = os.path.join(dirname, 'EMG_around_transition')
 os.makedirs(emg_dir, exist_ok=True)
-'''
-# Clear the folder by deleting all files within it -> code doesn't work?
-dirs_list = glob.glob(os.path.join(emg_dir, '*'))  # Get list of all files in the directory
-for file in dirs_list:
-    os.remove(file)  # Remove each file
-'''
+
 # Remove everything in emg_dir
 for item in os.listdir(emg_dir):  # List everything inside the directory
     item_path = os.path.join(emg_dir, item)
@@ -187,11 +182,12 @@ for item in os.listdir(emg_dir):  # List everything inside the directory
 # =============================================================================
 
 
-# %% EMG WAVEFORMS AROUND TRANSITION
+
 for (basename, taste, trial), group in grouped:
+    
     basename_dir = os.path.join(emg_dir, basename)
     os.makedirs(basename_dir, exist_ok=True)  # Ensure the folder is created
- 
+    plt.close()
     plt.figure(figsize=(10, 6))
     
     # Initialize variables to hold the last point of the previous waveform
@@ -210,14 +206,18 @@ for (basename, taste, trial), group in grouped:
     for _, row in group.iterrows():
         segment_raw = row['segment_raw']
         segment_bounds = row['segment_bounds']
+        #print(segment_bounds)
         cluster_num = row['cluster_num']
-
+        #segment_bounds_adjusted = row['time_from_trial_start'] #TODO: EXPERIMENTAL
+        #print(segment_bounds_adjusted)
         # Adjust segment bounds relative to the transition time
         segment_bounds_adjusted = [segment_bounds[0] - transition_time, segment_bounds[1] - transition_time]
-
+        #print(segment_bounds_adjusted)
         # Create time values using the adjusted segment bounds
+        if segment_bounds_adjusted[0] == segment_bounds_adjusted[1]:
+            continue
         time_values = np.linspace(segment_bounds_adjusted[0], segment_bounds_adjusted[1], len(segment_raw))
-        
+
         # Plot the waveform
         plt.plot(time_values, segment_raw, color='black')
         
@@ -241,16 +241,13 @@ for (basename, taste, trial), group in grouped:
     plt.title(f"Waveforms for Trial {trial}, Taste {taste}, {basename}")
     plt.xlabel('Time (ms)')
     plt.ylabel('Waveform Amplitude')
-    #plt.legend()
-    #plt.legend(["Legend Label"])
     plt.plot()
+    
     # Save the plot
-    #emg_all_path = os.path.join(emg_dir, f'trial{trial}_taste{taste}_{basename}_emg.png')
-    #plt.savefig(emg_all_path)
-    #plt.clf()
     emg_all_path = os.path.join(basename_dir, f'trial{trial}_taste{taste}_{basename}_emg.png')
     plt.savefig(emg_all_path)
     plt.clf()
+
 
 # %% BEHAVIOR RASTER PLOT
 # ==============================================================================
@@ -510,6 +507,7 @@ for basename, taste_group in grouped:
     freq_all_path = os.path.join(freq_dir, f'{taste_group["taste_name"].iloc[0]}_{basename[0]}.png')
     plt.savefig(freq_all_path)
     plt.clf()
+    plt.close()
 
 
 
@@ -532,7 +530,7 @@ for basename, taste_group in grouped:
 
     # Plot each row of the z-scored behavior array
     #plt.figure(figsize=(10, 6))
-    
+
     fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
     plot_idx = 0
     
@@ -609,7 +607,7 @@ for basename, taste_group in grouped:
     freq_all_path = os.path.join(freq_dir, f'zscore_{taste_group["taste_name"].iloc[0]}_{basename[0]}.png')
     plt.savefig(freq_all_path)
     plt.clf()
-
+    plt.close()
 
 
 

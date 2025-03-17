@@ -22,6 +22,7 @@ from scipy.ndimage import gaussian_filter1d  # for smoothing
 from scipy.optimize import curve_fit
 import piecewise_regression
 from sklearn.metrics.pairwise import cosine_similarity
+from scipy.optimize import linear_sum_assignment
 
 # ==============================================================================
 # Load data and get setup
@@ -42,7 +43,7 @@ df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste
 # Setup color map
 # ==============================================================================
 
-# Define a color mapping for specific cluster numbers
+# Colros for gapes and no movement is set
 color_mapping = {
     -1.0: '#ff9900',  # Gapes Color for cluster -1
     -2.0: '#D3D3D3'   # No movement Color for cluster -2
@@ -54,6 +55,70 @@ basename_colors = plt.cm.viridis_r(np.linspace(0, 1, len(basename_list)))
 basename_color_map = dict(zip(basename_list, basename_colors))
 
 
+
+# ==============================================================================
+# Function to standardize MTM cluster labels
+# Compare cosine similarity of average feature vectors between two test sessions
+# Standardize the labels based on maximizing the sum of cosine similarity values
+# ==============================================================================      
+
+def standardize_labels(this_vector_df, next_basename, processed_basenames):
+    
+    processed_basenames.append(next_basename)
+    
+    # Build dataframe of average feature vector for each cluster (row)
+    for cluster in cluster_range:
+
+        filtered_df = df[(df['basename'] == next_basename) & (df['cluster_num'] == cluster)]
+        feature_matrix = np.vstack(filtered_df['features'].values)  # Stack rows into a matrix
+        next_avg_vector = np.mean(feature_matrix, axis=0) # Compute the average vector
+        next_vector_df.at[next_vector_df[next_vector_df['clust_num'] == cluster].index[0], 'avg_vector'] = next_avg_vector.tolist()
+    
+    this_vectors = np.vstack(this_vector_df['avg_vector'].values)
+    next_vectors = np.vstack(next_vector_df['avg_vector'].values)
+    
+    # Compute pairwise cosine similarity between every feature vector
+    similarity_matrix = cosine_similarity(this_vectors, next_vectors)
+    # Matrix of similarity 
+    similarity_df = pd.DataFrame(similarity_matrix, 
+                             index=this_vector_df['clust_num'], 
+                             columns=next_vector_df['clust_num'])
+    # Plot similarity matrix
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(similarity_df, annot=True, cmap='coolwarm', cbar=True, fmt=".2f", 
+                xticklabels=next_vector_df['clust_num'], yticklabels=this_vector_df['clust_num'])
+    
+    plt.title(f'{next_basename}')
+    plt.xlabel('Next Vector')
+    plt.ylabel('This Vector')
+
+    plt.tight_layout()
+    plt.show()
+    
+    # Re-order indices of cluster labels such that it produces the highest summed cosine simiarity value
+    row_ind, col_ind = linear_sum_assignment(-similarity_matrix)
+
+    # Apply the optimal cluster label mapping
+    for i in range(len(row_ind)):
+        this_cluster = this_vector_df.iloc[row_ind[i]]['clust_num']
+        next_cluster = next_vector_df.iloc[col_ind[i]]['clust_num']
+        df.loc[(df['basename'] == next_basename) & (df['cluster_num'] == next_cluster), 'new_cluster_num'] = this_cluster
+        print(f"{next_cluster} → {this_cluster}")
+
+    # Update average vectors to be a combination of 
+    for cluster in cluster_range:
+        combined_df = pd.concat([
+            df[(df['basename'] == b) & (df['cluster_num'] == cluster)] for b in processed_basenames
+        ])
+        
+        if not combined_df.empty:
+            feature_matrix = np.vstack(combined_df['features'].values)  
+            this_avg_vector = np.mean(feature_matrix, axis=0).astype(object)
+            this_vector_df.at[this_vector_df[this_vector_df['clust_num'] == cluster].index[0], 'avg_vector'] = this_avg_vector.tolist()
+
+    return this_vector_df, processed_basenames
+
+# %%% Plot waveforms per cluster label
 # ==============================================================================
 # Setup folder structure and clear any .png files in folders
 # ============================================================================== 
@@ -68,81 +133,8 @@ for folder in [label_dir, gapes_dir, nothing_dir]:
     for file in all_files:
         os.remove(file)
         
-# ==============================================================================
-# Function
-# ==============================================================================       
-def standardize_labels(this_vector_df, next_basename):
 
-    for cluster in cluster_range:
 
-        filtered_df = df[(df['basename'] == next_basename) & (df['cluster_num'] == cluster)]
-        feature_matrix = np.vstack(filtered_df['features'].values)  # Stack rows into a matrix
-        next_avg_vector = np.mean(feature_matrix, axis=0) # Compute the average vector
-        next_vector_df.at[next_vector_df[next_vector_df['clust_num'] == cluster].index[0], 'avg_vector'] = next_avg_vector.tolist()
-    
-    this_vectors = np.vstack(this_vector_df['avg_vector'].values)
-    next_vectors = np.vstack(next_vector_df['avg_vector'].values)
-    
-    # Compute pairwise cosine similarity between every vector in `this_vectors` and `next_vectors`
-    similarity_matrix = cosine_similarity(this_vectors, next_vectors)
-
-    similarity_df = pd.DataFrame(similarity_matrix, 
-                             index=this_vector_df['clust_num'], 
-                             columns=next_vector_df['clust_num'])
-    
-    plt.figure(figsize=(8, 6))  # Optional: adjust the size of the figure
-    sns.heatmap(similarity_df, annot=True, cmap='coolwarm', cbar=True, fmt=".2f", 
-                xticklabels=next_vector_df['clust_num'], yticklabels=this_vector_df['clust_num'])
-    
-    # Add labels and title
-    plt.title('Cosine Similarity Heatmap')
-    plt.xlabel('Next Vector')
-    plt.ylabel('This Vector')
-    
-    # Show the plot
-    plt.tight_layout()
-    plt.show()
-    
-    similarity_list = similarity_matrix.flatten().tolist()
-    
-    this_used = []
-    next_used = []
-    print("new comparison")
-    while len(this_used) < len(cluster_range):
-        
-        max_num = np.max(similarity_list)
-
-        max_index = np.argwhere(similarity_matrix == max_num)[0]
-
-        # Step 3: Use these indices to find the corresponding cluster numbers
-        this_cluster = this_vector_df['clust_num'].iloc[max_index[0]]
-        next_cluster = next_vector_df['clust_num'].iloc[max_index[1]]
-        
-        if this_cluster not in this_used and next_cluster not in next_used:
-            df.loc[(df['basename'] == next_basename) & (df['cluster_num'] == next_cluster), 'new_cluster_num'] = this_cluster
-            print(this_cluster, next_cluster)
-        
-            this_used.append(this_cluster)
-            next_used.append(next_cluster)
-        similarity_list.remove(max_num)
-
-    
-    for cluster in cluster_range:
-        one_filtered_df = df[(df['basename'] == basename) & (df['cluster_num'] == cluster)]
-        two_filtered_df = df[(df['basename'] == next_basename) & (df['cluster_num'] == cluster)]
-        combined_df = pd.concat([one_filtered_df, two_filtered_df])
-        
-        # Stack rows into a matrix
-        feature_matrix = np.vstack(combined_df['features'].values)  
-        
-        # Compute the average vector
-        this_avg_vector = np.mean(feature_matrix, axis=0).astype(object)
-        this_vector_df.at[this_vector_df[this_vector_df['clust_num'] == cluster].index[0], 'avg_vector'] = this_avg_vector.tolist()
-
-    
-    return this_vector_df
-
-# %%%
 # ==============================================================================
 # Plot waveforms by cluster and basename
 # ==============================================================================
@@ -176,16 +168,19 @@ for (cluster, basename), group in cluster_basename_groups:
         plt.close(fig)
 
 
-# %%%
+# %%% Standardize Cluster Labels
 # ==============================================================================
-# Plot waveforms by cluster and basename
+# Standardize Cluster Labels
 # ==============================================================================
 
-df['new_cluster_num'] = np.nan
-
+# Initialize important things
 unique_basename = df['basename'].unique().tolist()
 cluster_range = df['cluster_num'].unique()[df['cluster_num'].unique() >= 0].tolist()
 cluster_range.sort()
+
+df['new_cluster_num'] = np.nan
+df.loc[df['cluster_num'] < 0, 'new_cluster_num'] = df['cluster_num']
+df.loc[df['basename'] == unique_basename[0], 'new_cluster_num'] = df['cluster_num']
 
 
 initialize_this_vector = {'clust_num': cluster_range, 'avg_vector': np.nan}
@@ -194,33 +189,58 @@ this_vector_df = pd.DataFrame(data=initialize_this_vector, dtype=object)
 initialize_next_vector = {'clust_num': cluster_range, 'avg_vector': np.nan}
 next_vector_df = pd.DataFrame(data=initialize_next_vector, dtype=object)
 
+processed_basenames = [unique_basename[0]]
 
-
-### CODE BELOW IS EXPERIMENTAL
+# Standardize first and second test sessions first
 basename = unique_basename[0]
 next_basename = unique_basename[1]
+for cluster in cluster_range:
+    filtered_df = df[(df['basename'] == basename) & (df['cluster_num'] == cluster)]
+    feature_matrix = np.vstack(filtered_df['features'].values)  # Stack rows into a matrix
+    this_avg_vector = np.mean(feature_matrix, axis=0).astype(object) # Compute the average vector
+    this_vector_df.at[this_vector_df[this_vector_df['clust_num'] == cluster].index[0], 'avg_vector'] = this_avg_vector.tolist()
+print(unique_basename[1])
+this_vector_df, processed_basenames = standardize_labels(this_vector_df, next_basename, processed_basenames)
 
-filtered_df = df[(df['basename'] == basename) & (df['cluster_num'] == cluster)]
-feature_matrix = np.vstack(filtered_df['features'].values)  # Stack rows into a matrix
-this_avg_vector = np.mean(feature_matrix, axis=0).astype(object) # Compute the average vector
-this_vector_df.at[this_vector_df[this_vector_df['clust_num'] == cluster].index[0], 'avg_vector'] = this_avg_vector.tolist()
 
-standardize_labels(this_vector_df, next_basename)
+# Standardize all other test sessions sequentially
+for basename in unique_basename[1:-1]:
+    idx = unique_basename.index(basename)
+    next_basename = unique_basename[idx+1]
+    print(next_basename)
+    this_vector_df, processed_basenames =  standardize_labels(this_vector_df, next_basename, processed_basenames)
 
+
+# %% Check dataframe is good, then overwrite and save
+
+# First testing that 'df' dataframe looks OK
+unique_clusters_by_basename = df.groupby('basename')['new_cluster_num'].unique()
+
+if any(pd.isna(unique_clusters_by_basename)): # Check if there are any rows with unassigned cluster numbers
+    print("Warning: there are NaN values in new_cluster_num")
+lengths = [len(unique_clusters) for unique_clusters in unique_clusters_by_basename] # Check that all test sessions have the same number of cluster labels
+if len(set(lengths)) != 1:
+    print("Warning: Number of cluster labels vary by test session", lengths)
+
+# Rename cluster-related column names
+df.rename(columns={'cluster_num': 'old_cluster_num'}, inplace=True)
+df.rename(columns={'new_cluster_num': 'cluster_num'}, inplace=True)
+
+
+# Overwrite and safe dataframe
+df.to_pickle(file_path) # Overwrite and save dataset
+
+
+
+# %% - ARCHIVE
 
 
 '''
-### THIS CODE WORKS
-for basename in unique_basename[:1]:
-    idx = unique_basename.index(basename)
-    next_basename = unique_basename[idx+1]
+
+
+def standardize_labels(this_vector_df, next_basename):
+    # Build dataframe of average feature vector for each cluster (row)
     for cluster in cluster_range:
-        filtered_df = df[(df['basename'] == basename) & (df['cluster_num'] == cluster)]
-        feature_matrix = np.vstack(filtered_df['features'].values)  # Stack rows into a matrix
-        this_avg_vector = np.mean(feature_matrix, axis=0).astype(object) # Compute the average vector
-        this_vector_df.at[this_vector_df[this_vector_df['clust_num'] == cluster].index[0], 'avg_vector'] = this_avg_vector.tolist()
-
-
 
         filtered_df = df[(df['basename'] == next_basename) & (df['cluster_num'] == cluster)]
         feature_matrix = np.vstack(filtered_df['features'].values)  # Stack rows into a matrix
@@ -230,75 +250,69 @@ for basename in unique_basename[:1]:
     this_vectors = np.vstack(this_vector_df['avg_vector'].values)
     next_vectors = np.vstack(next_vector_df['avg_vector'].values)
     
-    # Compute pairwise cosine similarity between every vector in `this_vectors` and `next_vectors`
+    # Compute pairwise cosine similarity between every feature vector
     similarity_matrix = cosine_similarity(this_vectors, next_vectors)
-
+    # Matrix of similarity 
     similarity_df = pd.DataFrame(similarity_matrix, 
                              index=this_vector_df['clust_num'], 
                              columns=next_vector_df['clust_num'])
-    
-    plt.figure(figsize=(8, 6))  # Optional: adjust the size of the figure
+    # Plot similarity matrix
+    plt.figure(figsize=(8, 6))
     sns.heatmap(similarity_df, annot=True, cmap='coolwarm', cbar=True, fmt=".2f", 
                 xticklabels=next_vector_df['clust_num'], yticklabels=this_vector_df['clust_num'])
     
-    # Add labels and title
-    plt.title('Cosine Similarity Heatmap')
+    plt.title(f'{next_basename}')
     plt.xlabel('Next Vector')
-    plt.ylabel(f'This Vector (basename #{idx})')
-    
-    # Show the plot
+    plt.ylabel('This Vector')
+
     plt.tight_layout()
     plt.show()
     
+    ## Standardize labels by matching greatest similarities
+    # Flatten similarity matrix (to find maximum value)
     similarity_list = similarity_matrix.flatten().tolist()
+    
     this_used = []
     next_used = []
-    print("new comparison")
+
     while len(this_used) < len(cluster_range):
         
         max_num = np.max(similarity_list)
+        max_index = np.argwhere(similarity_matrix == max_num)[0] # Find matrix index of maximum number
 
-        max_index = np.argwhere(similarity_matrix == max_num)[0]
-
-        # Step 3: Use these indices to find the corresponding cluster numbers
+        # Use matrix index to find the corresponding cluster numbers
         this_cluster = this_vector_df['clust_num'].iloc[max_index[0]]
         next_cluster = next_vector_df['clust_num'].iloc[max_index[1]]
         
+        # Check that the clusters have not been used already
         if this_cluster not in this_used and next_cluster not in next_used:
             df.loc[(df['basename'] == next_basename) & (df['cluster_num'] == next_cluster), 'new_cluster_num'] = this_cluster
+            
             print(this_cluster, next_cluster)
         
             this_used.append(this_cluster)
             next_used.append(next_cluster)
         similarity_list.remove(max_num)
 
-
-
-for cluster in cluster_range:
-    one_filtered_df = df[(df['basename'] == basename) & (df['cluster_num'] == cluster)]
-    two_filtered_df = df[(df['basename'] == next_basename) & (df['cluster_num'] == cluster)]
-    combined_df = pd.concat([one_filtered_df, two_filtered_df])
     
-    # Stack rows into a matrix
-    feature_matrix = np.vstack(combined_df['features'].values)  
-    
-    # Compute the average vector
-    this_avg_vector = np.mean(feature_matrix, axis=0).astype(object)
-    this_vector_df.at[this_vector_df[this_vector_df['clust_num'] == cluster].index[0], 'avg_vector'] = this_avg_vector.tolist()
+    for cluster in cluster_range:
+        one_filtered_df = df[(df['basename'] == basename) & (df['cluster_num'] == cluster)]
+        two_filtered_df = df[(df['basename'] == next_basename) & (df['cluster_num'] == cluster)]
+        combined_df = pd.concat([one_filtered_df, two_filtered_df])
+        
+        # Stack rows into a matrix
+        feature_matrix = np.vstack(combined_df['features'].values)  
+        
+        # Compute the average vector
+        this_avg_vector = np.mean(feature_matrix, axis=0).astype(object)
+        this_vector_df.at[this_vector_df[this_vector_df['clust_num'] == cluster].index[0], 'avg_vector'] = this_avg_vector.tolist()
 
+    
+    return this_vector_df
 '''
 
 
 
-
-
-
-# %%
-for basename in unique_basename[2:]:
-    print(basename)
-    this_vector_df =  standardize_labels(this_vector_df, next_basename)
-    
-    
 
 
 
