@@ -23,7 +23,7 @@ from scipy.optimize import curve_fit
 import piecewise_regression
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.optimize import linear_sum_assignment
-
+import scipy.stats as stats
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
@@ -37,22 +37,6 @@ df['basename'] = df['basename'].str.lower() # All basenames to lowercase
 # Manually removed this sepcific data:
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
-
-    
-# ==============================================================================
-# Setup color map
-# ==============================================================================
-
-# Colros for gapes and no movement is set
-color_mapping = {
-    -1.0: '#ff9900',  # Gapes Color for cluster -1
-    -2.0: '#D3D3D3'   # No movement Color for cluster -2
-}
-
-# Generate unique colors for basenames
-basename_list = df['basename'].unique()
-basename_colors = plt.cm.viridis_r(np.linspace(0, 1, len(basename_list)))
-basename_color_map = dict(zip(basename_list, basename_colors))
 
 
 
@@ -127,16 +111,33 @@ label_dir = os.path.join(dirname, 'cluster_label_standardization')
 gapes_dir = os.path.join(label_dir, 'gapes')
 nothing_dir = os.path.join(label_dir, 'nothing')
 
+
 for folder in [label_dir, gapes_dir, nothing_dir]:
     os.makedirs(folder, exist_ok=True)
     all_files = glob.glob(os.path.join(folder, '*.png'))
     for file in all_files:
         os.remove(file)
+
         
+# ==============================================================================
+# Setup color map
+# ==============================================================================
+
+# Colros for gapes and no movement is set
+color_mapping = {
+    -1.0: '#ff9900',  # Gapes Color for cluster -1
+    -2.0: '#D3D3D3'   # No movement Color for cluster -2
+}
+
+# Generate unique colors for basenames
+basename_list = df['basename'].unique()
+basename_colors = plt.cm.viridis_r(np.linspace(0, 1, len(basename_list)))
+basename_color_map = dict(zip(basename_list, basename_colors))
+
 
 
 # ==============================================================================
-# Plot waveforms by cluster and basename
+# Plot waveforms divided cluster and basename
 # ==============================================================================
 cluster_basename_groups = df.groupby(['cluster_num', 'basename'])
 for (cluster, basename), group in cluster_basename_groups:
@@ -145,7 +146,7 @@ for (cluster, basename), group in cluster_basename_groups:
     # Use predefined colors for -1.0 and -2.0 clusters, otherwise assign colors by basename
     color = color_mapping.get(cluster, basename_color_map.get(basename, 'black'))
     
-    for segment in group['segment_norm_interp']:
+    for segment in group['segment_raw']:
         ax.plot(segment, alpha=0.1, color=color)
     
     ax.set_title(f'Cluster {cluster} - {basename} Waveforms')
@@ -229,6 +230,159 @@ df.rename(columns={'new_cluster_num': 'cluster_num'}, inplace=True)
 
 # Overwrite and safe dataframe
 df.to_pickle(file_path) # Overwrite and save dataset
+
+
+
+# %% Plot waveforms combined per cluster label
+# ==============================================================================
+# Setup folder structure and clear any .png files in folders
+# ============================================================================== 
+# Create folder for saving plots
+overlap_dir = os.path.join(dirname, 'combined_overlap_clusters')
+
+
+for folder in [overlap_dir]:
+    os.makedirs(folder, exist_ok=True)
+    all_files = glob.glob(os.path.join(folder, '*.png'))
+    for file in all_files:
+        os.remove(file)
+
+# Define a color mapping for cluster numbers
+color_mapping = {
+    -1: '#ff9900',      # Gapes Color for cluster -1
+    -2: '#D3D3D3',      # No mvoement Color for cluster 0
+     0: '#4285F4',     # Color for cluster 1
+     1: '#88498F',    # Color for cluster 2
+     2: '#0CBABA'        # Color for cluster 3
+}    
+
+# ==============================================================================
+# Plot waveforms divided cluster and basename
+# ==============================================================================
+cluster_basename_groups = df.groupby(['cluster_num'])
+for (cluster), group in cluster_basename_groups:
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    # Color map defined above
+    color = color_mapping.get(cluster, basename_color_map.get(cluster, 'black'))
+    for row in group.iterrows():
+        max_amp = max(row[1]['segment_raw'])
+        scaling_factor = row[1]['raw_features'][4]
+        segment = (row[1]['segment_raw'])/max_amp * scaling_factor
+        ax.plot(segment, alpha=0.1, color=color)
+    
+    ax.set_title(f'Cluster {cluster} Waveforms')
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Amplitude")
+    ax.set_ylim(-2, 15)
+    # Save plot
+    plot_filename = f'cluster{cluster}.png'
+
+    plot_path = os.path.join(overlap_dir, plot_filename)
+    plt.savefig(plot_path)
+    plt.close(fig)
+
+
+
+
+
+cluster_basename_groups = df.groupby(['cluster_num'])
+for cluster, group in cluster_basename_groups:
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Color map defined above
+    color = color_mapping.get(cluster, basename_color_map.get(basename, 'black'))
+    
+    # List to store normalized waveforms
+    normalized_waveforms = []
+    max_length = 0  # Track max length of waveforms
+    
+    for _, row in group.iterrows():
+        max_amp = max(row['segment_raw'])
+        scaling_factor = row['raw_features'][4]
+        segment = (row['segment_raw']) / max_amp * scaling_factor
+        
+        max_length = max(max_length, len(segment))  # Update max length
+        normalized_waveforms.append(segment)  # Collect for averaging
+        
+        ax.plot(segment, alpha=0.1, color=color)  # Individual waveforms
+    
+    # Pad waveforms to the same length
+    padded_waveforms = [np.pad(w, (0, max_length - len(w)), mode='constant') for w in normalized_waveforms]
+
+    # Compute and plot the average waveform
+    if padded_waveforms:
+        avg_waveform = np.mean(padded_waveforms, axis=0)  # Compute mean across waveforms
+        ax.plot(avg_waveform, 'k--', linewidth=2, label="Avg Waveform")  # Plot in black dotted line
+    
+    ax.set_title(f'Cluster {cluster} Waveforms')
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Amplitude")
+    ax.set_ylim(0, 20)
+    ax.legend()
+
+    # Save plot
+    plot_filename = f'cluster{cluster}.png'
+    plot_path = os.path.join(overlap_dir, plot_filename)
+    plt.savefig(plot_path)
+    plt.close(fig)
+
+
+
+# %%
+
+# Just MTM
+color_mapping = ['#4285F4','#88498F','#0CBABA']  
+
+# All behaviors
+#color_mapping = [ '#D3D3D3','#ff9900', '#4285F4','#88498F','#0CBABA']  
+
+
+feature_names = [
+    "duration",
+    "left_interval",
+    "right_interval",
+    "max_freq",
+    "amplitude_norm",
+    "pca_0",
+    "pca_1",
+    "pca_2"
+]
+
+features_expanded = pd.DataFrame(df["features"].tolist(), index=df.index, columns=feature_names)
+# Add cluster_num column at the front
+features_expanded.insert(0, "cluster_num", df["cluster_num"])
+
+# Sort the rows by cluster number
+features_expanded = features_expanded.sort_values(by="cluster_num")
+
+# Remove rows where cluster num is a negative value
+features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
+
+data1 = features_expanded.copy()
+data1.loc[:, features_expanded.columns != 'cluster_num'] = float('nan')
+ax = sns.heatmap(data1, cmap=color_mapping)
+data2 = features_expanded.copy()
+data2['cluster_num'] = float('nan')
+sns.heatmap(data2, yticklabels=False, cmap='jet', vmax=3)
+import scikit_posthocs as sp
+
+
+for feature in feature_names:
+    h_stat, p_value = stats.kruskal(features_expanded[features_expanded["cluster_num"] == 0][feature],
+                                    features_expanded[features_expanded["cluster_num"] == 1][feature],
+                                    features_expanded[features_expanded["cluster_num"] == 2][feature])
+    
+
+    if p_value < 0.05:  # Only proceed if Kruskal-Wallis is significant
+        print(f"{feature}: {p_value}")    
+        # Perform Dunn’s test with Bonferroni correction
+        dunn_results = sp.posthoc_dunn(features_expanded, val_col=feature, group_col="cluster_num", p_adjust="bonferroni")
+        print(dunn_results)
+        print(" ")
+    else:
+        print(f'{feature} not significant ({p_value})')
+
 
 
 
