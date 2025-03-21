@@ -24,6 +24,14 @@ import piecewise_regression
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.optimize import linear_sum_assignment
 import scipy.stats as stats
+import scikit_posthocs as sp
+import pingouin as pg
+from scipy.stats import tukey_hsd
+from statsmodels.stats.multicomp import pairwise_tukeyhsd
+
+# TODO: I THINK THIS CODE DOESN'T WORK AFTER THE LABELS HAVE BEEN STANDARDIZED ALREADY.
+# MAKE IT RE-RUN-ABLE FRIENDLY
+
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
@@ -331,6 +339,12 @@ for cluster, group in cluster_basename_groups:
 
 # %%
 
+
+
+# ==============================================================================
+# Plot heatmap. Each column is a feature and each row is a waveform's feature vector
+# ==============================================================================
+
 # Just MTM
 color_mapping = ['#4285F4','#88498F','#0CBABA']  
 
@@ -364,24 +378,92 @@ data1.loc[:, features_expanded.columns != 'cluster_num'] = float('nan')
 ax = sns.heatmap(data1, cmap=color_mapping)
 data2 = features_expanded.copy()
 data2['cluster_num'] = float('nan')
-sns.heatmap(data2, yticklabels=False, cmap='jet', vmax=3)
-import scikit_posthocs as sp
+sns.heatmap(data2, yticklabels=False, cmap='viridis', vmax=3)
 
 
+# ==============================================================================
+# Three variations of stats to see if features are significantly different across clusters
+# ==============================================================================
+
+
+# ANOVA and on a random n=50 sample of waveforms for each feature
+feature_dict = {key: [] for key in feature_names}
+
+for _ in range(1000):
+    for feature in feature_names:
+        group_zero = features_expanded[features_expanded["cluster_num"] == 0][feature].sample(n=50)
+        group_one = features_expanded[features_expanded["cluster_num"] == 1][feature].sample(n=50)
+        group_two = features_expanded[features_expanded["cluster_num"] == 2][feature].sample(n=50)
+
+        f_statistic, p_value = stats.f_oneway(group_zero, group_one, group_two)
+        feature_dict[feature].append(p_value)
+        #if p_value < 0.05:   
+        #    print(f'{feature}: {p_value}')
+        #else:
+        #    print(f'{feature} not significant ({p_value})')
+# Plot the distribution of p-values for each feature
+for feature, p_values in feature_dict.items():
+    plt.figure(figsize=(12, 8))
+    sns.histplot(p_values, bins=10, kde=True)
+    plt.axvline(x=0.05, color="red", linestyle="--")
+    plt.title(f"P-Values for {feature}")
+    plt.xlabel("p-value")
+    plt.ylabel("Count")
+    plt.show()
+
+
+
+# ANOVA and Tukey HSD post-hoc
+# I think the data is not always normal - so not as good of a test
+for feature in feature_names:
+    group_zero = features_expanded[features_expanded["cluster_num"] == 0][feature]
+    group_one = features_expanded[features_expanded["cluster_num"] == 1][feature]
+    group_two = features_expanded[features_expanded["cluster_num"] == 2][feature]
+    data_ano = pd.DataFrame({
+        "score": pd.concat([group_zero, group_one, group_two]).values,
+        "group": ["0"] * len(group_zero) + ["1"] * len(group_one) + ["2"] * len(group_two)
+    })
+    
+    anova_results = pg.anova(dv='score', between="group", data=data_ano, detailed=True)
+    print(f"feature: {feature}\n", anova_results.round(3))
+    if anova_results["p-unc"][0] < 0.05 and anova_results["np2"][0] > 0.06:
+        print("significant and medium-large effect size")
+        res = tukey_hsd(group_zero, group_one, group_two)
+        #res = pairwise_tukeyhsd(data_ano["score"], data_ano["group"]) # Does this work for Tukey-Kramer?
+        print(res)
+    elif anova_results["p-unc"][0] < 0.05 and anova_results["np2"][0] > 0.01:
+        print("significant but small effect size")
+    print("\n")
+
+
+
+
+# KRUSKAL WALLIS WITH DUNN'S POST-HOC: FOR NON-NORMAL DATA
+# Most correct?
 for feature in feature_names:
     h_stat, p_value = stats.kruskal(features_expanded[features_expanded["cluster_num"] == 0][feature],
                                     features_expanded[features_expanded["cluster_num"] == 1][feature],
                                     features_expanded[features_expanded["cluster_num"] == 2][feature])
     
+    # Calculate Eta-squared for effect size
+    k = 3  # number of groups (clusters)
+    N = len(features_expanded)  # total number of observations
+    eta_squared = (h_stat - k + 1) / (N - k)
+    if p_value < 0.05 :
+        if eta_squared > 0.06:  # Only proceed if Kruskal-Wallis is significant
+            print(f"{feature} p-value: {p_value.round(5)}, effect size: {eta_squared.round(4)}")
+            
+            # Perform Dunn’s test with Bonferroni correction
+            dunn_results = sp.posthoc_dunn(features_expanded, val_col=feature, group_col="cluster_num", p_adjust="bonferroni")
+            print(dunn_results.round(3))
 
-    if p_value < 0.05:  # Only proceed if Kruskal-Wallis is significant
-        print(f"{feature}: {p_value}")    
-        # Perform Dunn’s test with Bonferroni correction
-        dunn_results = sp.posthoc_dunn(features_expanded, val_col=feature, group_col="cluster_num", p_adjust="bonferroni")
-        print(dunn_results)
-        print(" ")
+        elif eta_squared > 0.01:
+            print(f'{feature} is signficiant ({p_value.round(5)}) but small effect size ({eta_squared.round(4)})')
+        else:
+            print(f'{feature} is signficiant ({p_value.round(5)}) but inconsequential effect size')
     else:
-        print(f'{feature} not significant ({p_value})')
+        print(f'{feature} not significant ({p_value.round(5)})')
+    print('\n')
 
 
 
