@@ -24,8 +24,8 @@ from scipy.spatial.distance import mahalanobis
 # Load data and get setup
 # ==============================================================================
 dirname = '/home/natasha/Desktop/clustering_data/'
-file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only events labelled by video scoring
-#file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
+#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only events labelled by video scoring
+file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
 df = pd.read_pickle(file_path)
 df = df.rename(columns={'pred_event_type': 'event_type'})
 
@@ -178,7 +178,7 @@ else:
 #else:
 #    cmap = 'inferno'
 
-# UMAP with GMM on a session-by-session basis
+# PCA with GMM on a session-by-session basis
 for session in df.session_ind.unique():
     #if session == 0:
     #    continue
@@ -428,9 +428,7 @@ for session in df.session_ind.unique():
         optimal_gmm.fit(embedding)
         labels = optimal_gmm.predict(embedding)
 
-        # Add cluster number label to df dataframe
-        #df.loc[(df.session_ind == session) & (df.event_type == 'mouth or tongue movement'), 'cluster_num'] = labels
-
+ v
         # For speed, only create individual session plots for the first iteration
         if i == 0:
             # Another scatter plot where colors based on the 'yes' or 'no' in 'multimodal' column

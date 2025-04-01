@@ -6,7 +6,7 @@ Created on Thu Feb 27 13:06:52 2025
 @author: natasha
 """
 
-
+import umap
 import numpy as np
 import pandas as pd
 import os
@@ -28,6 +28,11 @@ import scikit_posthocs as sp
 import pingouin as pg
 from scipy.stats import tukey_hsd
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
+from scipy.stats import sem  # Standard error of the mean
+import umap
+from mpl_toolkits.mplot3d import Axes3D
+from sklearn.mixture import GaussianMixture
+
 
 # TODO: I THINK THIS CODE DOESN'T WORK AFTER THE LABELS HAVE BEEN STANDARDIZED ALREADY.
 # MAKE IT RE-RUN-ABLE FRIENDLY
@@ -241,7 +246,7 @@ df.to_pickle(file_path) # Overwrite and save dataset
 
 
 
-# %% Plot waveforms combined per cluster label
+# %% Plot overlapped waveforms combined per cluster label
 # ==============================================================================
 # Setup folder structure and clear any .png files in folders
 # ============================================================================== 
@@ -266,31 +271,39 @@ color_mapping = {
 
 # ==============================================================================
 # Plot waveforms divided cluster and basename
+# TWO DIFFERENT VERSIONS. DECIDING WHICH IS THE BEST
 # ==============================================================================
+
 cluster_basename_groups = df.groupby(['cluster_num'])
 for (cluster), group in cluster_basename_groups:
     fig, ax = plt.subplots(figsize=(8, 6))
     
     # Color map defined above
     color = color_mapping.get(cluster, basename_color_map.get(cluster, 'black'))
+    
+    waveforms = np.vstack(group['segment_norm_interp'].values)  # Assuming each is a NumPy array of the same length
+    avg_waveform = np.mean(waveforms, axis=0)  # Compute the mean waveform
+
+    
     for row in group.iterrows():
-        max_amp = max(row[1]['segment_raw'])
-        scaling_factor = row[1]['raw_features'][4]
-        segment = (row[1]['segment_raw'])/max_amp * scaling_factor
-        ax.plot(segment, alpha=0.1, color=color)
+        #max_amp = max(row[1]['segment_raw'])
+        #scaling_factor = row[1]['raw_features'][4]
+        #segment = (row[1]['segment_raw'])/max_amp * scaling_factor
+        #ax.plot(segment, alpha=0.1, color=color)
+        ax.plot(row[1]['segment_norm_interp'], alpha=0.1, color=color)
+    
+    ax.plot(avg_waveform, color='black', linestyle='dashed', linewidth=2, label="Average Waveform")
     
     ax.set_title(f'Cluster {cluster} Waveforms')
     ax.set_xlabel("Time")
     ax.set_ylabel("Amplitude")
-    ax.set_ylim(-2, 15)
+    #ax.set_ylim(0, 20)
     # Save plot
-    plot_filename = f'cluster{cluster}.png'
+    plot_filename = f'norm_cluster{cluster}.png'
 
     plot_path = os.path.join(overlap_dir, plot_filename)
     plt.savefig(plot_path)
     plt.close(fig)
-
-
 
 
 
@@ -309,14 +322,15 @@ for cluster, group in cluster_basename_groups:
         max_amp = max(row['segment_raw'])
         scaling_factor = row['raw_features'][4]
         segment = (row['segment_raw']) / max_amp * scaling_factor
-        
+        segment = (row['segment_raw'])
         max_length = max(max_length, len(segment))  # Update max length
         normalized_waveforms.append(segment)  # Collect for averaging
         
         ax.plot(segment, alpha=0.1, color=color)  # Individual waveforms
     
     # Pad waveforms to the same length
-    padded_waveforms = [np.pad(w, (0, max_length - len(w)), mode='constant') for w in normalized_waveforms]
+    #padded_waveforms = [np.pad(w, (0, max_length - len(w)), mode='constant') for w in normalized_waveforms]
+    padded_waveforms = [ np.pad(w, ((max_length - len(w)) // 2, (max_length - len(w) + 1) // 2), mode='constant') for w in normalized_waveforms ]
 
     # Compute and plot the average waveform
     if padded_waveforms:
@@ -326,7 +340,7 @@ for cluster, group in cluster_basename_groups:
     ax.set_title(f'Cluster {cluster} Waveforms')
     ax.set_xlabel("Time")
     ax.set_ylabel("Amplitude")
-    ax.set_ylim(0, 20)
+    ax.set_ylim(0, 500)
     ax.legend()
 
     # Save plot
@@ -337,9 +351,191 @@ for cluster, group in cluster_basename_groups:
 
 
 
-# %%
+fig, ax = plt.subplots(figsize=(10, 6))
+filtered_df = df[df['cluster_num'] >= 0]
+
+for cluster, group in filtered_df.groupby(['cluster_num']):
+    color = color_mapping.get(cluster, basename_color_map.get(cluster, 'black'))
+    # Stack waveforms and compute mean & standard error
+    waveforms = np.vstack(group['segment_norm_interp'].values)
+    avg_waveform = np.mean(waveforms, axis=0)  
+    #std_err = sem(waveforms, axis=0)  
+    std_err = np.std(waveforms, axis=0)  # Compute standard deviation
+
+    ax.plot(avg_waveform, color='k', label=f'Cluster {cluster}')
+    ax.fill_between(range(len(avg_waveform)), avg_waveform - std_err, avg_waveform + std_err, color=color, alpha=0.3)
+
+ax.set_title('Cluster Average Waveforms with Standard Error')
+ax.set_xlabel("Time")
+ax.set_ylabel("Amplitude")
+ax.legend()
+plot_path = os.path.join(overlap_dir, 'avg_waveforms.png')
+
+#plt.savefig(plot_path)
+
+plt.show()
+plt.close(fig)
 
 
+
+
+
+fig, ax = plt.subplots(figsize=(10, 6))
+filtered_df = df[df['cluster_num'] >= 0]
+
+# Find max waveform length
+max_length = max(len(w) for w in filtered_df['segment_raw'])
+
+for cluster, group in filtered_df.groupby(['cluster_num']):
+    color = color_mapping.get(cluster, basename_color_map.get(cluster, 'black'))
+
+    # Pad waveforms evenly at the beginning and end
+    waveforms = [
+        np.pad(w, ((max_length - len(w)) // 2, (max_length - len(w)) - (max_length - len(w)) // 2), mode='constant')
+        for w in group['segment_raw']
+    ]
+    waveforms = np.vstack(waveforms)
+
+    # Compute mean waveform
+    avg_waveform = np.mean(waveforms, axis=0)
+
+    ax.plot(avg_waveform, color=color, label=f'Cluster {cluster}')
+
+ax.set_title('Cluster Average Waveforms')
+ax.set_xlabel("Time")
+ax.set_ylabel("Amplitude")
+ax.legend()
+plt.show()
+plt.close(fig)
+
+# %% UMAP - IN PROGRESS
+
+# ==============================================================================
+# Plot heatmap. Each column is a feature and each row is a waveform's feature vector
+# ==============================================================================
+
+# See if multimodal waveforms cluster with UMAP reduction
+reducer = umap.UMAP()
+filtered_df = df[df['cluster_num'] >= 0]
+waveforms = filtered_df['segment_norm_interp'].tolist()
+#scaled_waveforms = StandardScaler().fit_transform(waveforms)
+embedding = reducer.fit_transform(waveforms) # UMAP embedding
+
+# Fit the GMM with the optimal number of clustersz
+optimal_gmm = GaussianMixture(n_components=3, random_state=42)
+optimal_gmm.fit(embedding)
+labels = optimal_gmm.predict(embedding)
+
+# Add cluster number label to df dataframe
+filtered_df['gmm_cluster'] = labels
+
+# Create a list of colors for each point in the embedding based on its cluster_num
+cluster_nums = filtered_df['gmm_cluster'].tolist()
+
+# Create the scatter plot
+plt.figure(figsize=(10, 8))
+plt.scatter(embedding[:, 0], embedding[:, 1], c=cluster_nums, cmap='hot', s=20, edgecolor='k', alpha=0.5)
+plt.title('GMM on UMAP of Waveforms')
+plt.xlabel('UMAP 1')
+plt.ylabel('UMAP 2')
+
+# Optionally, add a legend or colorbar
+plt.show()
+
+
+from sklearn.cluster import KMeans
+    
+kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+filtered_df['kmeans_cluster'] = kmeans.fit_predict(embedding)
+
+# Prepare for Plotting
+cluster_nums = filtered_df['kmeans_cluster'].tolist()
+
+# Create Scatter Plot
+plt.figure(figsize=(10, 8))
+plt.scatter(embedding[:, 0], embedding[:, 1], c=cluster_nums, cmap='tab20', s=20, edgecolor='k', alpha=0.5)
+plt.title('K-Means Clustering on UMAP of Waveforms')
+plt.xlabel('UMAP 1')
+plt.ylabel('UMAP 2')
+
+# Optionally, add a colorbar
+
+plt.show()
+
+
+# ==============================================================================
+# Plot UMAP, color by standardized cluster label
+# ==============================================================================
+# Define a color mapping for cluster numbers
+color_mapping = {
+    -1: '#ff9900',      # Gapes Color for cluster -1
+    -2: '#D3D3D3',      # No mvoement Color for cluster 0
+     0: '#4285F4',     # Color for cluster 1
+     1: '#88498F',    # Color for cluster 2
+     2: '#0CBABA'        # Color for cluster 3
+}    
+
+# Create a list of colors for each point in the embedding based on its cluster_num
+cluster_nums = filtered_df['cluster_num'].tolist()  # Assuming 'cluster_num' column exists
+colors = [color_mapping[cluster] for cluster in cluster_nums]
+
+# Create the scatter plot
+plt.figure(figsize=(10, 8))
+plt.scatter(embedding[:, 0], embedding[:, 1], c=colors, s=50, edgecolor='k', alpha=0.7)
+plt.title('UMAP Scatter Plot of Waveforms')
+plt.xlabel('UMAP 1')
+plt.ylabel('UMAP 2')
+
+# Optionally, add a legend or colorbar
+plt.show()
+
+# ==============================================================================
+# 3D UMAP
+# ==============================================================================
+# Initialize UMAP reducer with 3 components for 3D embedding
+reducer = umap.UMAP(n_components=3)
+
+# Filter valid clusters
+filtered_df = df[df['cluster_num'] >= 0]
+waveforms = filtered_df['segment_norm_interp'].tolist()
+
+# Compute 3D UMAP embedding
+embedding = reducer.fit_transform(waveforms)
+
+# Define color mapping for clusters
+color_mapping = {
+    -1: '#ff9900',  # Gapes Color for cluster -1
+    -2: '#D3D3D3',  # No movement Color for cluster -2
+     0: '#4285F4',  # Color for cluster 0
+     1: '#88498F',  # Color for cluster 1
+     2: '#0CBABA'   # Color for cluster 2
+}
+
+# Map cluster numbers to colors
+cluster_nums = filtered_df['cluster_num'].tolist()
+colors = [color_mapping[cluster] for cluster in cluster_nums]
+
+# Create 3D scatter plot
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+# Scatter plot with cluster colors
+sc = ax.scatter(embedding[:, 0], embedding[:, 1], embedding[:, 2], 
+                c=colors, s=50, edgecolor='k', alpha=0.7)
+
+# Labels and title
+ax.set_title('3D UMAP Scatter Plot of Waveforms')
+ax.set_xlabel('UMAP 1')
+ax.set_ylabel('UMAP 2')
+ax.set_zlabel('UMAP 3')
+
+plt.show()
+
+
+
+
+
+# %% PLOTS TO SEE IF NEWLY STANDARDIZED CLUSTERS LOOK DIFFERENT - IN PROGRESS
 
 # ==============================================================================
 # Plot heatmap. Each column is a feature and each row is a waveform's feature vector
@@ -373,6 +569,8 @@ features_expanded = features_expanded.sort_values(by="cluster_num")
 # Remove rows where cluster num is a negative value
 features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
 
+
+plt.figure(figsize=(12, 8))
 data1 = features_expanded.copy()
 data1.loc[:, features_expanded.columns != 'cluster_num'] = float('nan')
 ax = sns.heatmap(data1, cmap=color_mapping)
@@ -380,10 +578,108 @@ data2 = features_expanded.copy()
 data2['cluster_num'] = float('nan')
 sns.heatmap(data2, yticklabels=False, cmap='viridis', vmax=3)
 
+ax.set_xticklabels(ax.get_xticklabels(), fontsize=14)
+ax.set_yticklabels(ax.get_yticklabels(), fontsize=14)
+plt.xlabel("Features", fontsize=16)
+plt.ylabel("MTM clusters", fontsize=16)
+
+plt.show()
+plt.close()
+
+# ==============================================================================
+# Heatmap of waveforms
+# ==============================================================================
+color_mapping = ['#4285F4','#88498F','#0CBABA']  
+
+features_expanded = pd.DataFrame(df["segment_norm_interp"].tolist(), index=df.index)
+# Add cluster_num column at the front
+features_expanded.insert(0, "cluster_num", df["cluster_num"])
+
+# Sort the rows by cluster number
+features_expanded = features_expanded.sort_values(by="cluster_num")
+
+# Remove rows where cluster num is a negative value
+features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
+
+
+plt.figure(figsize=(12, 8))
+data1 = features_expanded.copy()
+data1.loc[:, features_expanded.columns != 'cluster_num'] = float('nan')
+ax = sns.heatmap(data1, cmap=color_mapping)
+data2 = features_expanded.copy()
+data2['cluster_num'] = float('nan')
+sns.heatmap(data2, yticklabels=False, cmap='Spectral', vmax=3)
+
+ax.set_xticklabels(ax.get_xticklabels(), fontsize=14)
+ax.set_yticklabels(ax.get_yticklabels(), fontsize=14)
+plt.xlabel("Features", fontsize=16)
+plt.ylabel("MTM clusters", fontsize=16)
+
+plt.show()
+plt.close()
+
+# ==============================================================================
+# Clustermap by features
+# ==============================================================================
+
+# Define a color mapping for cluster numbers
+color_mapping = ['#4285F4','#88498F','#0CBABA']  
+
+features_expanded = pd.DataFrame(df["features"].tolist(), index=df.index)
+features_expanded.columns = feature_names
+# Add cluster_num column at the front
+features_expanded.insert(0, "cluster_num", df["cluster_num"])
+
+# Sort the rows by cluster number
+features_expanded = features_expanded.sort_values(by="cluster_num")
+
+# Remove rows where cluster num is a negative value
+features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
+
+
+plt.figure(figsize=(12, 8))
+clust_label = features_expanded.pop("cluster_num")
+lut = dict(zip(clust_label.unique(), color_mapping))
+row_colors = clust_label.map(lut)
+sns.clustermap(features_expanded, row_colors=row_colors, cmap="viridis")
+plt.show()
+plt.close()
+
+
+# ==============================================================================
+# Overlap of average waveforms with SE
+# ==============================================================================
+
+
+
+
+
+
+# %% STATS TO SEE IF NEWLY STANDARDIZED CLUSTERS ARE DIFFERENT - IN PROGRESS
 
 # ==============================================================================
 # Three variations of stats to see if features are significantly different across clusters
 # ==============================================================================
+feature_names = [
+    "duration",
+    "left_interval",
+    "right_interval",
+    "max_freq",
+    "amplitude_norm",
+    "pca_0",
+    "pca_1",
+    "pca_2"
+]
+
+features_expanded = pd.DataFrame(df["features"].tolist(), index=df.index, columns=feature_names)
+# Add cluster_num column at the front
+features_expanded.insert(0, "cluster_num", df["cluster_num"])
+
+# Sort the rows by cluster number
+features_expanded = features_expanded.sort_values(by="cluster_num")
+
+# Remove rows where cluster num is a negative value
+features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
 
 
 # ANOVA and on a random n=50 sample of waveforms for each feature
@@ -451,18 +747,19 @@ for feature in feature_names:
     eta_squared = (h_stat - k + 1) / (N - k)
     if p_value < 0.05 :
         if eta_squared > 0.06:  # Only proceed if Kruskal-Wallis is significant
-            print(f"{feature} p-value: {p_value.round(5)}, effect size: {eta_squared.round(4)}")
+            print(f"{feature} p-value: {p_value}")
+            print(f"H-stat {h_stat.round(3)}, effect size: {eta_squared.round(4)}")
             
             # Perform Dunn’s test with Bonferroni correction
             dunn_results = sp.posthoc_dunn(features_expanded, val_col=feature, group_col="cluster_num", p_adjust="bonferroni")
-            print(dunn_results.round(3))
+            print(dunn_results)
 
         elif eta_squared > 0.01:
-            print(f'{feature} is signficiant ({p_value.round(5)}) but small effect size ({eta_squared.round(4)})')
+            print(f'{feature} is signficiant ({p_value}) but small effect size ({eta_squared.round(4)})')
         else:
-            print(f'{feature} is signficiant ({p_value.round(5)}) but inconsequential effect size')
+            print(f'{feature} is signficiant ({p_value}) but inconsequential effect size')
     else:
-        print(f'{feature} not significant ({p_value.round(5)})')
+        print(f'{feature} not significant ({p_value})')
     print('\n')
 
 
