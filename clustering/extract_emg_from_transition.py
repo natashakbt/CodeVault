@@ -446,7 +446,7 @@ plt.xlim([-1, 2])
 plt.show()
 
 
-# %% FREQUENCY PLOTS
+# %% FREQUENCY PLOTS - by test session
 
 
 
@@ -510,99 +510,51 @@ for basename, taste_group in grouped:
     plt.close()
 
 
-
-
 # Z-scored values
 for basename, taste_group in grouped:
-    behavior_array = np.zeros((len(unique_clust_num), (window_len * 2)))  # Initialize occurrence tracking array
-
+    behavior_array = np.zeros((len(unique_clust_num), window_len * 2))  # Initialize occurrence tracking array
+    
+    # Populate behavior_array with occurrences
     for row in taste_group.itertuples():
         cluster_num = row.cluster_num
-        start_idx, end_idx = row.time_from_trial_start  # Access start and end
-        
-        # Ensure we correctly find the cluster index
+        start_idx, end_idx = row.time_from_trial_start
         cluster_idx = np.where(unique_clust_num == cluster_num)[0]
-
-        behavior_array[cluster_idx, start_idx:end_idx + 1] += 1  # Increment occurrences
-
+        behavior_array[cluster_idx, start_idx:end_idx + 1] += 1
+    
     # Compute z-score across time for each cluster
     behavior_array_z = np.apply_along_axis(zscore, 1, behavior_array, nan_policy='omit')
-
-    # Plot each row of the z-scored behavior array
-    #plt.figure(figsize=(10, 6))
-
+    
     fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
     plot_idx = 0
     
-    for i in range(behavior_array_z.shape[0]):
-        cluster_num = unique_clust_num[i]
-
-        # Skip cluster -2.0 (no movement)
-        if cluster_num == -2.0:
+    for i, cluster_num in enumerate(unique_clust_num):
+        if cluster_num == -2.0:  # Skip no movement cluster
             continue
-
-        # Get the color for the cluster from the mapping
-        cluster_color = color_mapping.get(cluster_num, '#000000')  # Default to black if cluster not in mapping
         
-        
-        x_values = np.arange(behavior_array_z.shape[1])  # Time indices
+        x_values = np.arange(behavior_array_z.shape[1])
         y_values = behavior_array_z[i, :]
+        cluster_color = color_mapping.get(cluster_num, '#000000')
         
-        # Fit piecewise linear regression
-        pw_fit = piecewise_regression.Fit(x_values, y_values, n_breakpoints=2)
-        pw_results = pw_fit.get_results()
-
-        '''
         # Fit sigmoid
         try:
-            #  L = amp ,x0 = middle, k = slope, b = offset
-            p0 = [max(y_values), np.median(x_values),1,0] # this is an mandatory initial guess
-    
-            popt, pcov = curve_fit(
-                sigmoid, x_values[::10], y_values[::10], p0, 
-                method='dogbox', maxfev = 5000)
-            fitted_y = sigmoid(x_values, *popt)  # Generate fitted values
-    
-            # Plot fitted curve
-            axes[plot_idx].plot(x_values, fitted_y, color=cluster_color, linestyle='-', linewidth=2, alpha=0.9, label=f'Fit Cluster {cluster_num}')
+            p0 = [max(y_values), np.median(x_values), 1, 0]  # Initial guess
+            popt, _ = curve_fit(sigmoid, x_values[::10], y_values[::10], p0, method='dogbox', maxfev=5000)
+            fitted_y = sigmoid(x_values, *popt)
+            axes[plot_idx].plot(x_values, fitted_y, color=cluster_color, linestyle='-', linewidth=2, alpha=0.9)
         except RuntimeError:
-            print("Runtime Error skip")
-        '''
+            print(f"Runtime Error: Skipping cluster {cluster_num}")
         
         # Plot individual data points
-        #pw_fit.plot_fit(ax=axes[plot_idx], color="red", linewidth=1)
         axes[plot_idx].scatter(x_values, y_values, color=cluster_color, alpha=0.7, s=10, label=f'Cluster {cluster_num}')
         axes[plot_idx].axvline(x=window_len, color='k', ls='--')
         axes[plot_idx].set_ylabel('Z-score')
-        axes[plot_idx].legend()
-        plt.sca(axes[plot_idx])  # Set the current axes
-        pw_fit.plot_fit(color="red", linewidth=1)
         
         plot_idx += 1
-        
-        '''
-        # Smooth the line using a Gaussian filter
-        smoothed_line = gaussian_filter1d(behavior_array_z[i, :], sigma=5)
-
-        # Plot the smoothed z-score line
-        #plt.plot(smoothed_line, label=f'Cluster {cluster_num}', color=cluster_color)
-
-
-        # Plot in its own subplot
-        axes[plot_idx].plot(smoothed_line, label=f'Cluster {cluster_num}', color=cluster_color)
-        axes[plot_idx].axvline(x=window_len, color='k', ls='--')
-        axes[plot_idx].set_ylabel('Z-score')
-        axes[plot_idx].legend()
-        
-        plot_idx += 1
-        '''
-    plt.xlabel('Time (in ms; mid-point is transition)')
-    plt.ylabel('Z-scored Occurrences')
-    plt.axvline(x=window_len, color='k', ls='--')
-    plt.legend()
+    
+    plt.xlabel('Time (ms; mid-point is transition)')
     plt.suptitle(f'Z-score: {basename[0]} - {taste_group["taste_name"].iloc[0]}')
     plt.tight_layout()
-    #plt.show()
+    
     # Save the plot
     freq_all_path = os.path.join(freq_dir, f'zscore_{taste_group["taste_name"].iloc[0]}_{basename[0]}.png')
     plt.savefig(freq_all_path)
@@ -610,8 +562,121 @@ for basename, taste_group in grouped:
     plt.close()
 
 
+# %% FREQUENCY PLOTS - ALL COMBINED
 
-# %% Test before/after
+# Define a color mapping for cluster numbers
+color_mapping = {
+    -1: '#ff9900',      # Gapes Color for cluster -1
+    -2: '#D3D3D3',      # No mvoement Color for cluster 0
+     0: '#4285F4',     # Color for cluster 1
+     1: '#88498F',    # Color for cluster 2
+     2: '#0CBABA'        # Color for cluster 3
+}
+
+
+
+# Ensure the directory exists
+overlay_dir = os.path.join(freq_dir, 'overlay')
+os.makedirs(overlay_dir, exist_ok=True)
+
+# Clear the folder by deleting all files within it
+files = glob.glob(os.path.join(overlay_dir, '*'))
+for file in files:
+    os.remove(file)
+
+# Get unique clusters (excluding -2.0)
+unique_clust_num = np.sort(transition_events_df['cluster_num'].unique())
+unique_clust_num = unique_clust_num[unique_clust_num != -2.0]  # Remove cluster -2.0 (no movement)
+
+# Group by taste only, then process each separately
+taste_groups = transition_events_df.groupby(['taste_name'])
+
+for taste, taste_df in taste_groups:
+    fig, axes = plt.subplots(len(unique_clust_num), 1, figsize=(10, 3 * len(unique_clust_num)), sharex=True)
+
+    if len(unique_clust_num) == 1:  # Ensure axes is always iterable
+        axes = [axes]
+
+    grouped_sessions = taste_df.groupby(['basename'])
+
+    for (basename, session_df) in grouped_sessions:
+        behavior_array = np.zeros((len(unique_clust_num), (window_len * 2)))  # Initialize behavior array
+        
+        for row in session_df.itertuples():
+            cluster_num = row.cluster_num
+            start_idx, end_idx = row.time_from_trial_start
+
+            # Find index of the cluster
+            cluster_idx = np.where(unique_clust_num == cluster_num)[0]
+
+            behavior_array[cluster_idx, start_idx:end_idx + 1] += 1
+
+        # Overlay each session onto the appropriate cluster subplot
+        for i, cluster_num in enumerate(unique_clust_num):
+            cluster_color = color_mapping.get(cluster_num, '#000000')
+            smoothed_line = gaussian_filter1d(behavior_array[i, :], sigma=2)
+
+            axes[i].plot(smoothed_line, color=cluster_color, alpha=0.7)
+            axes[i].axvline(x=window_len, color='k', ls='--')
+            axes[i].set_ylabel('Occurrences')
+
+    # Final plot formatting
+    axes[-1].set_xlabel('Time (in ms; mid-point is transition)')
+    fig.suptitle(f'Overlayed Sessions - {taste_df["taste_name"].iloc[0]}')
+    plt.tight_layout()
+
+    # Save the figure for this taste
+    overlay_all_path = os.path.join(overlay_dir, f'overlay_{taste}.png')
+    plt.savefig(overlay_all_path)
+    plt.clf()
+    plt.close()
+
+
+for taste, taste_df in taste_groups:
+    fig, axes = plt.subplots(len(unique_clust_num), 1, figsize=(10, 3 * len(unique_clust_num)), sharex=True)
+
+    if len(unique_clust_num) == 1:  # Ensure axes is always iterable
+        axes = [axes]
+
+    # Group by basename (session) within this taste
+    grouped_sessions = taste_df.groupby(['basename'])
+
+    for (basename, session_df) in grouped_sessions:
+        behavior_array = np.zeros((len(unique_clust_num), (window_len * 2)))  # Initialize behavior array
+        
+        for row in session_df.itertuples():
+            cluster_num = row.cluster_num
+            start_idx, end_idx = row.time_from_trial_start
+
+            # Find index of the cluster
+            cluster_idx = np.where(unique_clust_num == cluster_num)[0]
+
+            behavior_array[cluster_idx, start_idx:end_idx + 1] += 1
+
+        # Overlay each session onto the appropriate cluster subplot
+        for i, cluster_num in enumerate(unique_clust_num):
+            cluster_color = color_mapping.get(cluster_num, '#000000')  # Default to black if missing
+
+            # Compute z-score and smooth it
+            behavior_zscore = zscore(behavior_array[i, :])  # Compute z-score across time
+            behavior_zscore = np.nan_to_num(behavior_zscore)  # Handle NaN values safely
+            #smoothed_line = gaussian_filter1d(behavior_zscore, sigma=2)  # Apply Gaussian smoothing
+
+            axes[i].plot(behavior_zscore, color=cluster_color, alpha=0.7)  # Add session label
+            axes[i].axvline(x=window_len, color='k', ls='--')
+            axes[i].set_ylabel('Z-score')
+
+    # Final plot formatting
+    axes[-1].set_xlabel('Time (in ms; mid-point is transition)')
+    fig.suptitle(f'Z-score Overlayed Sessions - {taste}', fontsize=14)
+    plt.tight_layout()
+
+    # Save the figure for this taste
+    overlay_all_path = os.path.join(overlay_dir, f'Zscore_Overlay_{taste}.png')
+    plt.savefig(overlay_all_path)
+    plt.clf()
+    plt.close()
+
 
 # %% WHAT IS THIS CRAP
 # TODO: FIGURE OUT WHAT ALL THIS CRAP BELOW IS DOING. DO I NEED IT?
