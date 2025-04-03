@@ -191,6 +191,7 @@ for session in df.session_ind.unique():
         
         mtm_session_df['scaled_features'] = list(scaled_mtm_session) # ADDED FOR MAHAL DIST
         
+        #TODO: NEEDED TO CHECK IF I WHITENED?
         pca = PCA(n_components=0.9)
         embedding = pca.fit_transform(scaled_mtm_session)
         pca_dimmensions.append(embedding.shape[1])

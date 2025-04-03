@@ -41,7 +41,7 @@ df = df.loc[df['basename'].isin(tau_basenames)] # Keep only basenames
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
 
-window_len = 400 # Half of the total window
+window_len = 200 # Half of the total window
 
 
 
@@ -323,7 +323,8 @@ for basename, taste_group in grouped:
                     'basename': basename,
                     'taste': taste,
                     'cluster_num': cluster_num,
-                    'event_position': event_position
+                    'event_position': event_position,
+                    'trial': trial
                 })
 
             # Set x-axis limits centered around the transition time
@@ -341,6 +342,18 @@ for basename, taste_group in grouped:
     clust_all_path = os.path.join(clust_dir, f'trial{trial}_taste{taste}_{basename}_cluster_raster.png')
     plt.savefig(clust_all_path)
     plt.clf()
+
+# %% # BEFORE/AFTER TRANSITION COUNT
+# Convert the summary data to a DataFrame
+summary_df = pd.DataFrame(summary_data)
+
+count_df = pd.crosstab(
+    index=[summary_df["basename"], summary_df["trial"], summary_df["taste"], summary_df["event_position"]],
+    columns="movement_count"
+).reset_index()
+
+
+
 
 # %% # CHISQUARED ANALYSIS
 # ==============================================================================
@@ -631,13 +644,16 @@ for taste, taste_df in taste_groups:
     plt.clf()
     plt.close()
 
+# Z-score
+
+all_behavior_zscores = []
 
 for taste, taste_df in taste_groups:
     fig, axes = plt.subplots(len(unique_clust_num), 1, figsize=(10, 3 * len(unique_clust_num)), sharex=True)
 
     if len(unique_clust_num) == 1:  # Ensure axes is always iterable
         axes = [axes]
-
+    all_behavior_zscores = []
     # Group by basename (session) within this taste
     grouped_sessions = taste_df.groupby(['basename'])
 
@@ -652,6 +668,10 @@ for taste, taste_df in taste_groups:
             cluster_idx = np.where(unique_clust_num == cluster_num)[0]
 
             behavior_array[cluster_idx, start_idx:end_idx + 1] += 1
+        session_zscores = np.array([zscore(behavior_array[i, :]) for i in range(len(unique_clust_num))])
+        session_zscores = np.nan_to_num(session_zscores)  # Handle NaN values
+        
+        all_behavior_zscores.append(session_zscores)
 
         # Overlay each session onto the appropriate cluster subplot
         for i, cluster_num in enumerate(unique_clust_num):
@@ -665,6 +685,18 @@ for taste, taste_df in taste_groups:
             axes[i].plot(behavior_zscore, color=cluster_color, alpha=0.7)  # Add session label
             axes[i].axvline(x=window_len, color='k', ls='--')
             axes[i].set_ylabel('Z-score')
+    
+    all_behavior_zscores = np.array(all_behavior_zscores)  # Convert to NumPy array
+    mean_behavior_zscore = np.nanmean(all_behavior_zscores, axis=0)  # Mean across sessions
+    
+    # Overlay average line
+    for i, cluster_num in enumerate(unique_clust_num):
+        axes[i].plot(mean_behavior_zscore[i, :], 'k--', linewidth=2, label="Average")
+        axes[i].axvline(x=window_len, color='k', ls='--')
+        axes[i].set_ylabel('Z-score')
+        axes[i].legend()
+
+
 
     # Final plot formatting
     axes[-1].set_xlabel('Time (in ms; mid-point is transition)')
@@ -676,6 +708,7 @@ for taste, taste_df in taste_groups:
     plt.savefig(overlay_all_path)
     plt.clf()
     plt.close()
+
 
 
 # %% WHAT IS THIS CRAP

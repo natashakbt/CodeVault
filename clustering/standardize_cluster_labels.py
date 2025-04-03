@@ -619,7 +619,7 @@ plt.show()
 plt.close()
 
 # ==============================================================================
-# Clustermap by features
+# Clustermap by features - not actually clustering (when row_cluster = False)
 # ==============================================================================
 
 # Define a color mapping for cluster numbers
@@ -641,15 +641,37 @@ plt.figure(figsize=(12, 8))
 clust_label = features_expanded.pop("cluster_num")
 lut = dict(zip(clust_label.unique(), color_mapping))
 row_colors = clust_label.map(lut)
-sns.clustermap(features_expanded, row_colors=row_colors, cmap="viridis")
+sns.clustermap(features_expanded, row_colors=row_colors, cmap="jet", row_cluster = False)
 plt.show()
 plt.close()
 
 
 # ==============================================================================
-# Overlap of average waveforms with SE
+# Clustermap for PCA0 and PCA1 only - clustering
 # ==============================================================================
+# Define a color mapping for cluster numbers
+color_mapping = ['#4285F4','#88498F','#0CBABA']  
 
+features_expanded = pd.DataFrame(df["features"].tolist(), index=df.index)
+features_expanded.columns = feature_names
+# Add cluster_num column at the front
+features_expanded.insert(0, "cluster_num", df["cluster_num"])
+
+# Sort the rows by cluster number
+features_expanded = features_expanded.sort_values(by="cluster_num")
+
+# Remove rows where cluster num is a negative value
+features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
+
+pca_for_clustermap = features_expanded[['pca_0', 'pca_1', 'cluster_num']]
+
+plt.figure(figsize=(12, 8))
+clust_label = pca_for_clustermap.pop("cluster_num")
+lut = dict(zip(clust_label.unique(), color_mapping))
+row_colors = clust_label.map(lut)
+sns.clustermap(pca_for_clustermap, row_colors=row_colors, cmap="mako")
+plt.show()
+plt.close()
 
 
 
