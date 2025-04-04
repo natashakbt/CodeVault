@@ -37,7 +37,7 @@ transition_df['basename'] = transition_df['basename'].str.lower() # All basename
 transition_df = transition_df.rename(columns={'taste': 'taste_num'}) # NEW changed column name.
 tau_basenames = transition_df.basename.unique() # Find all basenames in transition_df
 df = df.loc[df['basename'].isin(tau_basenames)] # Keep only basenames 
-# Manually removed this sepcific data:
+# Manually removed this specific data:
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
 
@@ -343,7 +343,7 @@ for basename, taste_group in grouped:
     plt.savefig(clust_all_path)
     plt.clf()
 
-# %% # BEFORE/AFTER TRANSITION COUNT
+# %% # BEFORE/AFTER TRANSITION COUNT - NEED TO MAKE IT LOOP THROUGH WINDOW LENGTH
 # Convert the summary data to a DataFrame
 summary_df = pd.DataFrame(summary_data)
 

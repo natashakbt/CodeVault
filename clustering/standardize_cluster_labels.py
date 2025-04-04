@@ -32,7 +32,7 @@ from scipy.stats import sem  # Standard error of the mean
 import umap
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.mixture import GaussianMixture
-
+from sklearn.cluster import KMeans
 
 # TODO: I THINK THIS CODE DOESN'T WORK AFTER THE LABELS HAVE BEEN STANDARDIZED ALREADY.
 # MAKE IT RE-RUN-ABLE FRIENDLY
@@ -411,7 +411,7 @@ plt.close(fig)
 # %% UMAP - IN PROGRESS
 
 # ==============================================================================
-# Plot heatmap. Each column is a feature and each row is a waveform's feature vector
+# Plot UMAP of waveforms, clustered by GMM 
 # ==============================================================================
 
 # See if multimodal waveforms cluster with UMAP reduction
@@ -443,8 +443,11 @@ plt.ylabel('UMAP 2')
 plt.show()
 
 
-from sklearn.cluster import KMeans
-    
+
+# ==============================================================================
+# Plot UMAP of waveforms, clustered by k-means 
+# ==============================================================================
+  
 kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
 filtered_df['kmeans_cluster'] = kmeans.fit_predict(embedding)
 
@@ -531,7 +534,9 @@ ax.set_zlabel('UMAP 3')
 
 plt.show()
 
-
+# ==============================================================================
+# TODO: TRY NCA ON ALL MTM *FEATURES* INSTEAD OF UMAP
+# ==============================================================================
 
 
 
@@ -673,9 +678,27 @@ sns.clustermap(pca_for_clustermap, row_colors=row_colors, cmap="mako")
 plt.show()
 plt.close()
 
+# ==============================================================================
+# Scatter plot of PCA0 by PCA1 - colors by cluster
+# ==============================================================================
+color_mapping = {
+     0: '#4285F4',  # Color for cluster 0
+     1: '#88498F',  # Color for cluster 1
+     2: '#0CBABA'   # Color for cluster 2
+}
 
+colors = features_expanded['cluster_num'].map(color_mapping)
 
+plt.scatter(
+    features_expanded['pca_0'], features_expanded['pca_1'], 
+    c=colors,
+    s=5
+    #alpha=0.7
+)
 
+plt.xlabel('PCA 0')
+plt.ylabel('PCA 1')
+plt.show()
 
 # %% STATS TO SEE IF NEWLY STANDARDIZED CLUSTERS ARE DIFFERENT - IN PROGRESS
 
