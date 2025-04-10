@@ -534,11 +534,7 @@ ax.set_zlabel('UMAP 3')
 
 plt.show()
 
-# ==============================================================================
-# TODO: TRY NCA ON ALL MTM *FEATURES* INSTEAD OF UMAP
-# ==============================================================================
-
-
+   
 
 # %% PLOTS TO SEE IF NEWLY STANDARDIZED CLUSTERS LOOK DIFFERENT - IN PROGRESS
 

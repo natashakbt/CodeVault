@@ -9,6 +9,7 @@ Created on Tue Aug 20 11:10:24 2024
 import numpy as np
 import pandas as pd
 import os
+import math
 import matplotlib.pyplot as plt
 import glob
 from scipy.stats import chi2_contingency
@@ -20,6 +21,8 @@ from scipy.interpolate import make_interp_spline, BSpline
 from scipy.ndimage import gaussian_filter1d  # for smoothing
 from scipy.optimize import curve_fit
 import piecewise_regression
+from scipy.stats import ttest_rel
+
 
 # ==============================================================================
 # Load data and get setup
@@ -41,10 +44,17 @@ df = df.loc[df['basename'].isin(tau_basenames)] # Keep only basenames
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
 
-window_len = 200 # Half of the total window
+# ==============================================================================
+# Important variables to set
+# ==============================================================================
+window_len = 500 # Half of the total window
+fixed_transition_time = 2800 # Set to nan or a fixed time from stimulus delivery (2000ms+)
+chosen_transition = 1 # Choose out of 0, 1, or 2 (palatability transition is 1); MAKE SURE TO SET ABOVE TO Nan
 
 
-
+# ==============================================================================
+# Define functions
+# ==============================================================================
 def assign_pal_taste(row):
     # Map taste_name to 1, 0, or -1 based on conditions
     if row['taste_name'] in ['nacl', 'water', 'suc']:
@@ -55,10 +65,19 @@ def assign_pal_taste(row):
         print(f"Unknown palatability of taste: {row['taste_name']}")
         return -1
 
-
 def sigmoid(x, L ,x0, k, b):
     y = L / (1 + np.exp(-k*(x-x0))) + b
     return (y)
+
+def convert_taste_num_to_name(basename, taste_num, df):
+    result = df.loc[
+        (df['basename'] == basename) & (df['taste'] == taste_num), 'taste_name'
+    ]
+    if not result.empty:
+        return result.iloc[0]
+    else:
+        print("Uh oh. No taste num to name match")
+        return None
 
 
 # %% IMPORTANT DATAFRAME SETUP
@@ -72,7 +91,6 @@ taste_num_list = []
 trial_num_list = []
 scaled_mode_tau_list = []
 
-chosen_transition = 1 # Choose out of 0, 1, or 2
 
 # Iterate over each row in the original dataframe
 for i, row in transition_df.iterrows():
@@ -108,21 +126,25 @@ for i in range(len(expanded_df)):
         trial = row['trial']
         taste = row['taste']
         basename = row['basename'].lower()
-        transition_time_point = expanded_df.loc[
-            (expanded_df['trial_num'] == trial) & 
-            (expanded_df['taste_num'] == str(taste)) & 
-            (expanded_df['basename'] == basename), 
-            'scaled_mode_tau'
-        ].values[0]
-        #transition_time_point = 0 # to align to taste delivery
+        if math.isnan(fixed_transition_time):
+            transition_time_point = expanded_df.loc[
+                (expanded_df['trial_num'] == trial) & 
+                (expanded_df['taste_num'] == str(taste)) & 
+                (expanded_df['basename'] == basename), 
+                'scaled_mode_tau'
+            ].values[0]
+        else:
+            transition_time_point = fixed_transition_time # to align to fixed palatability transition
+        
         window_start = transition_time_point - window_len
         window_end = transition_time_point + window_len
-        #print(window_start, window_end)
+
+        # Append wavelength with adjusted start/stops if wavelength is within the window
         if window_start <= segment_bounds[0] <= window_end and window_start <= segment_bounds[1] <= window_end:
             new_row = row.copy()  # Copy row to modify it safely
             new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, segment_bounds[1] - window_start) # Alter segment time to be from trial start
             rows.append(new_row)
-
+        # Adjust wavelength stop time if ends after the window
         elif window_start <= segment_bounds[1] <= window_end:
             new_row = row.copy()
             new_row['segment_bounds'] = (window_start, segment_bounds[1])
@@ -130,6 +152,7 @@ for i in range(len(expanded_df)):
             cut_idx = window_start - segment_bounds[0]
             new_row['segment_raw'] = row['segment_raw'][cut_idx:]
             rows.append(new_row)
+        # Adjust wavelength start time if it starts before the window
         elif window_start <= segment_bounds[0] <= window_end:
             new_row = row.copy()
             new_row['segment_bounds'] = (segment_bounds[0], window_end)
@@ -138,22 +161,13 @@ for i in range(len(expanded_df)):
             new_row['segment_raw'] = row['segment_raw'][:cut_idx]
             rows.append(new_row)
 
+
             
 # Create a DataFrame from the list of rows
 transition_events_df = pd.DataFrame(rows).reset_index(drop=True)
 transition_events_df = transition_events_df.drop(columns = ['segment_norm_interp'])
 
-# Define a color mapping for cluster numbers
-color_mapping = {
-    -1: '#ff9900',      # Gapes Color for cluster -1
-    -2: '#D3D3D3',      # No mvoement Color for cluster 0
-     0: '#4285F4',     # Color for cluster 1
-     1: '#88498F',    # Color for cluster 2
-     2: '#0CBABA'        # Color for cluster 3
-}
 
-# Group by basename (session), taste, and trial
-grouped = transition_events_df.groupby(['basename', 'taste', 'trial'])
 
 # %% EMG WAVEFORMS AROUND TRANSITION
 # ==============================================================================
@@ -180,8 +194,17 @@ for item in os.listdir(emg_dir):  # List everything inside the directory
 
 #cmap = plt.cm.get_cmap('tab10')
 # =============================================================================
+# Define a color mapping for cluster numbers
+color_mapping = {
+    -1: '#ff9900',      # Gapes Color for cluster -1
+    -2: '#D3D3D3',      # No mvoement Color for cluster 0
+     0: '#4285F4',     # Color for cluster 1
+     1: '#88498F',    # Color for cluster 2
+     2: '#0CBABA'        # Color for cluster 3
+}
 
-
+# Group by basename (session), taste, and trial
+grouped = transition_events_df.groupby(['basename', 'taste', 'trial'])
 
 for (basename, taste, trial), group in grouped:
     
@@ -194,29 +217,30 @@ for (basename, taste, trial), group in grouped:
     prev_end_time = None
     prev_end_value = None
     
-    # Retrieve the transition time for this trial
-    transition_time = expanded_df.loc[
-        (expanded_df['trial_num'] == trial) & 
-        (expanded_df['taste_num'] == str(taste)) & 
-        (expanded_df['basename'] == basename), 
-        'scaled_mode_tau'
-    ].values[0]
+    if fixed_transition_time.isnan():
+        transition_time_point = expanded_df.loc[
+            (expanded_df['trial_num'] == trial) & 
+            (expanded_df['taste_num'] == str(taste)) & 
+            (expanded_df['basename'] == basename), 
+            'scaled_mode_tau'
+        ].values[0]
+    else:
+        transition_time_point = fixed_transition_time # to align to fixed palatability transition
     
-    # Iterate through each row within the group (each segment)
+    # Iterate through each row within the group (i.e. each segment)
     for _, row in group.iterrows():
         segment_raw = row['segment_raw']
         segment_bounds = row['segment_bounds']
-        #print(segment_bounds)
         cluster_num = row['cluster_num']
-        #segment_bounds_adjusted = row['time_from_trial_start'] #TODO: EXPERIMENTAL
-        #print(segment_bounds_adjusted)
+
         # Adjust segment bounds relative to the transition time
-        segment_bounds_adjusted = [segment_bounds[0] - transition_time, segment_bounds[1] - transition_time]
-        #print(segment_bounds_adjusted)
+        segment_bounds_adjusted = [segment_bounds[0] - transition_time_point, segment_bounds[1] - transition_time_point]
+        print(segment_bounds_adjusted)
         # Create time values using the adjusted segment bounds
         if segment_bounds_adjusted[0] == segment_bounds_adjusted[1]:
             continue
         time_values = np.linspace(segment_bounds_adjusted[0], segment_bounds_adjusted[1], len(segment_raw))
+        #time_values = np.linspace(segment_bounds[0], segment_bounds[1], len(segment_raw))
 
         # Plot the waveform
         plt.plot(time_values, segment_raw, color='black')
@@ -254,6 +278,8 @@ for (basename, taste, trial), group in grouped:
 # Raster plot of events around the transition, 1 plot per session per taste
 # ==============================================================================
 
+lookup_df = transition_events_df[['taste', 'taste_name', 'basename']].drop_duplicates()
+
 clust_dir = os.path.join(dirname, 'cluster_raster_transition')
 os.makedirs(clust_dir, exist_ok=True)
 
@@ -262,19 +288,18 @@ files = glob.glob(os.path.join(clust_dir, '*'))
 for file in files:
     os.remove(file)  # Remove each file
 
-
 # Initialize an empty list to store the rows for the final dictionary
 summary_data = []
-
 
 # Group by basename (session) and taste
 grouped = transition_events_df.groupby(['basename', 'taste'])
 
 # Create a figure and populate the dictionary
 for basename, taste_group in grouped:
+
     taste = basename[1]
     basename = basename[0]
-    
+
     # Create a subplot for each taste
     num_tastes = len(taste_group['taste'].unique())
     fig, axs = plt.subplots(nrows=num_tastes, figsize=(8, 10), sharex=True, sharey=True)
@@ -291,14 +316,16 @@ for basename, taste_group in grouped:
 
         # Loop through each trial and plot it as a block along time
         for trial, trial_data in trial_group.groupby('trial'):
-            # Retrieve the transition time from expanded_df
-            transition_time = expanded_df.loc[
-                (expanded_df['trial_num'] == trial) & 
-                (expanded_df['taste_num'] == str(taste)) & 
-                (expanded_df['basename'] == basename), 
-                'scaled_mode_tau'
-            ].values[0]
-
+            if math.isnan(fixed_transition_time):
+                transition_time_point = expanded_df.loc[
+                    (expanded_df['trial_num'] == trial) & 
+                    (expanded_df['taste_num'] == str(taste)) & 
+                    (expanded_df['basename'] == basename), 
+                    'scaled_mode_tau'
+                ].values[0]
+            else:
+                transition_time_point = fixed_transition_time # to align to fixed palatability transition
+            
             # Dictionary to store before/after counts for this trial
             trial_summary = {}
 
@@ -312,19 +339,23 @@ for basename, taste_group in grouped:
 
                 # Plot each trial as a block
                 segment_bounds = row['segment_bounds']
-                ax.fill_between([segment_bounds[0] - transition_time, segment_bounds[1] - transition_time], 
+                ax.fill_between([segment_bounds[0] - transition_time_point, segment_bounds[1] - transition_time_point], 
                                 trial - 0.5, trial + 0.5, color=color)
                 
                 # Check if the event occurred before or after the transition
-                event_position = "before" if segment_bounds[1] < transition_time else "after"
-
+                event_position = "before" if segment_bounds[1] < transition_time_point else "after"
+                
+                
+                taste_name = convert_taste_num_to_name(basename, taste, lookup_df)
+                
                 # Add to the summary_data list
                 summary_data.append({
                     'basename': basename,
                     'taste': taste,
                     'cluster_num': cluster_num,
                     'event_position': event_position,
-                    'trial': trial
+                    'trial': trial,
+                    'taste_name': taste_name
                 })
 
             # Set x-axis limits centered around the transition time
@@ -335,24 +366,196 @@ for basename, taste_group in grouped:
         ax.set_xlabel('Time (ms)')
 
         # Print the vector of all cluster_num values for this trial group
-        print(f"Trial Group for Taste: {taste}, Basename: {basename}:")
+        print(f"Taste: {taste_name}, Basename: {basename}:")
 
     plt.suptitle(f'{basename}')
     plt.tight_layout()
-    clust_all_path = os.path.join(clust_dir, f'trial{trial}_taste{taste}_{basename}_cluster_raster.png')
+    clust_all_path = os.path.join(clust_dir, f'{taste_name}_{basename}_cluster_raster.png')
     plt.savefig(clust_all_path)
     plt.clf()
 
 # %% # BEFORE/AFTER TRANSITION COUNT - NEED TO MAKE IT LOOP THROUGH WINDOW LENGTH
+
+
+# TODO:NONE OF THIS IS WORKING :'(
+# I THINK IT's BECUASE MY UNIQUE COMBINATIONS INCLUDE BASENAME
+
 # Convert the summary data to a DataFrame
 summary_df = pd.DataFrame(summary_data)
+summary_df = summary_df[summary_df['cluster_num'] != -2.0] # REMOVE NO MOVEMENT
 
-count_df = pd.crosstab(
-    index=[summary_df["basename"], summary_df["trial"], summary_df["taste"], summary_df["event_position"]],
-    columns="movement_count"
-).reset_index()
+count_df = summary_df.groupby(
+    ['basename', 'cluster_num', 'event_position', 'taste_name', 'trial']
+).size().reset_index(name='movement_count')
+# Make sure before values are ordered first, then after values. For plotting
+count_df['event_position'] = pd.Categorical(count_df['event_position'], categories=['before', 'after'], ordered=True)
+
+unique_combinations = count_df[['basename', 'cluster_num', 'taste_name']].drop_duplicates()
+
+results = []
+for _, row in unique_combinations.iterrows():
+    basename = row['basename']
+    cluster = row['cluster_num']
+    taste = row['taste_name']
+
+    # Filter count_df for matching rows
+    matching_rows = count_df[
+        (count_df['basename'] == basename) &
+        (count_df['cluster_num'] == cluster) &
+        (count_df['taste_name'] == taste)
+    ]
+    
+    num_of_rows = len(matching_rows['trial'].unique())
+    ttest_df = pd.DataFrame(0, index=range(num_of_rows), columns=['trial', 'before', 'after'])
+    ttest_df.trial = matching_rows['trial'].unique()
+    
+    
+    for _, row in matching_rows.iterrows():
+        trial = row['trial']
+        event_pos = row['event_position']
+        move_count = row['movement_count']
+        
+        ttest_df.loc[ttest_df['trial'] == trial, event_pos] = move_count
+    stat, pval = ttest_rel(ttest_df['after'], ttest_df['before'])   
+    
+    results.append({
+        'taste': taste,
+        'cluster_num': cluster,
+        'n_trials': len(ttest_df),
+        'p_value': pval
+    })
+
+# Convert results to DataFrame
+results_df = pd.DataFrame(results)
+
+# Print any significant results
+for _,row in results_df.iterrows():
+    if row['p_value'] < 0.05:
+        taste = row['taste']
+        cluster_num= row['cluster_num']
+        print(f'Significant: taste {taste} and cluster {cluster_num}')
 
 
+# ==============================================================================
+# Plot and test where every data point is a trial
+# ==============================================================================
+# Group by taste and cluster_num
+results = []
+grouped = count_df.groupby(['taste_name', 'cluster_num'])
+
+print("significance where every data point is a trial")
+for (taste, cluster), group in grouped:
+    # Aggregate first to avoid duplicate index values when pivoting
+    agg = group.groupby(['trial', 'event_position'])['movement_count'].sum().unstack()
+    # Drop rows where before or after is missing
+    agg = agg.dropna(subset=['before', 'after'])
+    
+    if len(agg) > 1:  # Run t-test
+        print(agg['after'])
+        stat, pval = ttest_rel(agg['after'], agg['before'])
+        results.append({
+            'taste': taste,
+            'cluster_num': cluster,
+            'n_trials': len(agg),
+            'p_value': pval
+        })
+
+# Convert results to DataFrame
+results_df = pd.DataFrame(results)
+
+# Print any significant results
+for _,row in results_df.iterrows():
+    if row['p_value'] < 0.05:
+        taste = row['taste']
+        cluster_num= row['cluster_num']
+        print(f'Significant: taste {taste} and cluster {cluster_num}')
+
+
+# Plot grid of taste num by cluster num
+g = sns.FacetGrid(count_df, col='taste_name', row='cluster_num', margin_titles=True, sharey=False)
+g.map_dataframe(
+    sns.stripplot,
+    x='event_position',
+    y='movement_count',
+    hue='event_position',
+    palette='pastel',
+    legend=False
+)
+g.set_axis_labels("", "Movement Count")
+plt.tight_layout()
+plt.show()
+
+
+# ==============================================================================
+# Raster plot of events around the transition, 1 plot per session per taste
+# ==============================================================================
+
+# Average across trials per basename
+basename_avg_df = count_df.groupby(['basename', 'cluster_num', 'event_position', 'taste_name'])['movement_count'] \
+                          .mean().reset_index()
+basename_avg_df['movement_count'] = basename_avg_df['movement_count'].fillna(0)
+
+print("significance where every data point is a test session")
+
+results = []
+grouped = basename_avg_df.groupby(['taste_name', 'cluster_num'])
+
+for (taste, cluster), group in grouped:
+    # Pivot so we get before and after columns per basename
+    agg = group.pivot_table(index='basename', 
+                            columns='event_position', 
+                            values='movement_count')
+    # Drop rows where before or after is missing
+    agg = agg.dropna(subset=['before', 'after'])
+
+    # Run paired t-test
+    if len(agg) > 1:  # Need at least 2 basenames for paired test
+        stat, pval = ttest_rel(agg['after'], agg['before'])
+        results.append({
+            'taste': taste,
+            'cluster_num': cluster,
+            'n_basenames': len(agg),
+            'p_value': pval
+        })
+
+# Convert to DataFrame
+results_df = pd.DataFrame(results)
+
+# Print significant results
+for _, row in results_df.iterrows():
+    if row['p_value'] < 0.05:
+        print(f"Significant: taste {row['taste']} and cluster {row['cluster_num']} (n={row['n_basenames']})")
+
+# Box plot grid of taste num by cluster num
+g = sns.FacetGrid(basename_avg_df, col='taste_name', row='cluster_num', margin_titles=True, sharey=False)
+g.map_dataframe(
+    sns.stripplot,
+    x='event_position',
+    y='movement_count',
+    hue='event_position',
+    palette='pastel',
+    legend=False
+)
+g.set_axis_labels("", "Movement Count")
+plt.tight_layout()
+plt.show()
+
+
+
+
+# ==============================================================================
+# Test plot of just one clusternum for one taste
+# ==============================================================================
+'''
+# Just testing one plot
+filtered = count_df[(count_df['taste_name'] == 'suc') & (count_df['cluster_num']==1.0)]
+sns.stripplot(x=filtered['event_position'],
+            y=filtered['movement_count'],
+            hue=filtered['event_position'],
+            palette='pastel',
+            legend=False)
+
+'''
 
 
 # %% # CHISQUARED ANALYSIS
@@ -377,9 +580,8 @@ summary_pivot['pal_taste'] = summary_pivot.apply(assign_pal_taste, axis=1)
 summary_pivot.drop(columns=['taste'], inplace=True)
 
 collapsed_summary = summary_pivot.groupby(['basename', 'cluster_num', 'pal_taste'], as_index=False).sum()
-
-# TODO: REMOVE NO MOVEMENT
-collapsed_summary = collapsed_summary[collapsed_summary['cluster_num'] != -2.0]
+ 
+collapsed_summary = collapsed_summary[collapsed_summary['cluster_num'] != -2.0] # REMOVE NO MOVEMENT
 
 
 # Create a pivot table to ensure 'before' and 'after' values are aligned by 'cluster_num'
@@ -395,8 +597,21 @@ for (basename, pal_taste), group in pivoted_df.groupby(level=['basename', 'pal_t
     after_vector = group['after'].values.flatten()
     print(f'before: {before_vector}')
     print(f'after: {after_vector}')
+    
+    
+    table = np.vstack([before_vector, after_vector])
+    
+    # Find columns where the sum across all rows is not zero
+    nonzero_columns = np.any(table != 0, axis=0)
+    
+    # Keep only those columns
+    filtered_table = table[:, nonzero_columns]
+
+    chi2_stat, p_value, dof, expected = chi2_contingency(filtered_table)
+
+    
     # Perform the Chi-squared test
-    chi2_stat, p_value, _, _ = chi2_contingency([before_vector, after_vector])
+    #chi2_stat, p_value, _, _ = chi2_contingency([before_vector, after_vector])
 
     # Store the results
     chi_squared_results.append({
@@ -412,10 +627,11 @@ chi_squared_results_df = pd.DataFrame(chi_squared_results)
 # ==============================================================================
 # Plotting Chi-Squared test and bar graph of behavior frequency before/after 
 # ==============================================================================
+'''
 # Create the scatter plot for the chi-squared p-values
 plt.figure(figsize=(6, 8))
 plt.axhline(y=0.05, color='k', linestyle='--') # Add a horizontal line at p = 0.05
-sns.scatterplot(x='pal_taste', y='p_value', data=chi_squared_results_df, s=200)  # 's' controls dot size
+sns.scatterplot(x='pal_taste', y='p_value', data=chi_squared_results_df, s=200)
 
 plt.yscale('log') # Set the y-axis to log scale
 
@@ -429,7 +645,7 @@ plt.title('P-Values vs. Pal Taste (Logarithmic Y-Scale)')
 plt.xlim([-1, 2]) # Set x-axis limits
 
 plt.show()
-
+'''
 
 # Color indicates basename
 # Plotting Chi-Squared test and bar graph of behavior frequency before/after 
@@ -444,19 +660,99 @@ plt.yscale('log')
 
 # Customize x-axis ticks to show only 0 and 1
 plt.xticks([0, 1])
+plt.xlim([-1, 2])
 
-# Add labels and title
 plt.xlabel('Pal Taste (0 or 1)')
 plt.ylabel('p-value')
 plt.title('P-Values vs. Pal Taste (Logarithmic Y-Scale)')
 
-# Set x-axis limits
-plt.xlim([-1, 2])
+plt.show()
 
-# Move the legend outside the plot for better visualization if there are many unique basenames
-#plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', title='Basename')
+
+# %% NEW CHI-SQUARED TEST
+
+# Convert the summary data to a DataFrame
+summary_df = pd.DataFrame(summary_data)
+# Pivot the DataFrame to create the before/after summary
+summary_pivot = summary_df.groupby(['basename', 'taste', 'cluster_num', 'event_position']).size().unstack(fill_value=0)
+# Reset index to make the DataFrame easier to read
+summary_pivot.reset_index(inplace=True)
+
+# Add the taste_name by merging with the transition_events_df on basename and taste
+# First, create a subset of transition_events_df with only unique (basename, taste) pairs and their taste_name
+taste_name_lookup = transition_events_df[['basename', 'taste', 'taste_name']].drop_duplicates()
+
+# Now merge the summary_pivot with this taste_name_lookup DataFrame to add the 'taste_name' column
+summary_pivot = pd.merge(summary_pivot, taste_name_lookup, how='left', on=['basename', 'taste'])
+# Apply the function to create the 'pal_taste' column
+summary_pivot['pal_taste'] = summary_pivot.apply(assign_pal_taste, axis=1)
+summary_pivot.drop(columns=['taste'], inplace=True)
+
+collapsed_summary = summary_pivot.groupby(['cluster_num', 'taste_name'], as_index=False).sum()
+
+# TODO: REMOVE NO MOVEMENT
+collapsed_summary = collapsed_summary[collapsed_summary['cluster_num'] != -2.0]
+
+
+# Create a pivot table to ensure 'before' and 'after' values are aligned by 'cluster_num'
+pivoted_df = collapsed_summary.pivot(index=['taste_name'], columns='cluster_num', values=['before', 'after']).fillna(0)
+
+# Initialize a list to store the results of the chi-squared tests
+chi_squared_results = []
+
+# Iterate through unique combinations of basename and pal_taste
+for (taste_name), group in pivoted_df.groupby(level=['taste_name']):
+    # Extract the 'before' and 'after' vectors, ensuring they are in the same order
+    before_vector = group['before'].values.flatten()
+    after_vector = group['after'].values.flatten()
+    print(f'before: {before_vector}')
+    print(f'after: {after_vector}')
+    
+    
+    table = np.vstack([before_vector, after_vector])
+    
+    # Find columns where the sum across all rows is not zero
+    nonzero_columns = np.any(table != 0, axis=0)
+    
+    # Keep only those columns
+    filtered_table = table[:, nonzero_columns]
+
+    chi2_stat, p_value, dof, expected = chi2_contingency(filtered_table)
+
+    
+    # Perform the Chi-squared test
+    #chi2_stat, p_value, _, _ = chi2_contingency([before_vector, after_vector])
+
+    # Store the results
+    chi_squared_results.append({
+        'basename': basename,
+        'taste_name': taste_name,
+        'chi2_stat': chi2_stat,
+        'p_value': p_value
+    })
+
+# Convert the results to a DataFrame
+chi_squared_results_df = pd.DataFrame(chi_squared_results)
+
+# ==============================================================================
+# Plotting Chi-Squared test p-value results 
+# ==============================================================================
+
+# Plotting Chi-Squared test and bar graph of behavior frequency before/after 
+plt.figure(figsize=(6, 8))
+plt.axhline(y=0.05, color='k', linestyle='--')  # Add a horizontal line at p = 0.05
+
+# Scatter plot for the p-values, using 'basename' as the hue to color-code
+sns.scatterplot(x='taste_name', y='p_value', hue='basename', data=chi_squared_results_df, s=400, palette='Set1', legend=False)
+
+# Add labels and title
+plt.xlabel('Tastant')
+plt.ylabel('p-value')
+plt.title('P-Values of chi-squared')
+
 
 plt.show()
+
 
 
 # %% FREQUENCY PLOTS - by test session

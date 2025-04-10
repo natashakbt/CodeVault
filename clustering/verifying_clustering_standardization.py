@@ -20,6 +20,9 @@ from sklearn.metrics import confusion_matrix
 from scipy import stats
 from tqdm import tqdm
 from sklearn.inspection import DecisionBoundaryDisplay
+from sklearn.neighbors import NeighborhoodComponentsAnalysis
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.pipeline import make_pipeline
 
 # ==============================================================================
 # Load data and get setup
@@ -68,6 +71,58 @@ X = features_expanded.drop(columns=["cluster_num"])
 y = features_expanded["cluster_num"]
 
 
+
+# %% ONE WAY TO DO NCA
+
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+nca = NeighborhoodComponentsAnalysis(random_state=0)
+
+nca = nca.fit(X_train, y_train)
+
+knn = KNeighborsClassifier(n_neighbors=3)
+
+knn.fit(X_train, y_train)
+
+print(knn.score(X_test, y_test))
+
+
+knn.fit(nca.transform(X_train), y_train)
+
+
+print(knn.score(nca.transform(X_test), y_test))
+
+
+# %% ANOTHER WAY TO DO NCA
+n_neighbors = 3
+random_state = 0
+
+nca = make_pipeline(
+    StandardScaler(),
+    NeighborhoodComponentsAnalysis(n_components=2, random_state=random_state),
+)
+knn = KNeighborsClassifier(n_neighbors=n_neighbors)
+plt.figure()
+# plt.subplot(1, 3, i + 1, aspect=1)
+
+# Fit the method's model
+nca.fit(X_train, y_train)
+
+# Fit a nearest neighbor classifier on the embedded training set
+knn.fit(nca.transform(X_train), y_train)
+
+# Compute the nearest neighbor accuracy on the embedded test set
+acc_knn = knn.score(nca.transform(X_test), y_test)
+
+# Embed the data set in 2 dimensions using the fitted model
+X_embedded = nca.transform(X)
+
+# Plot the projected points and show the evaluation score
+plt.scatter(X_embedded[:, 0], X_embedded[:, 1], c=y, s=30, cmap="Set1")
+plt.title(
+    "{}, KNN (k={})\nTest accuracy = {:.2f}".format("NCA", n_neighbors, acc_knn)
+)
+plt.show()
 
 # %% TRAINING SVM + PLOTTING CONFUSION MATRIX
 # ==============================================================================
@@ -178,7 +233,7 @@ def plot_training_data_with_decision_boundary(
         )
 
     # Plot samples by color and add legend
-    ax.scatter(X_2d[:, 0], X_2d[:, 1], c=y, s=30, edgecolors="k")
+    scatter = ax.scatter(X_2d[:, 0], X_2d[:, 1], c=y, s=5, edgecolors="k")
     ax.legend(*scatter.legend_elements(), loc="upper right", title="Classes")
     if long_title:
         ax.set_title(f" Decision boundaries of {kernel} kernel in SVC")
