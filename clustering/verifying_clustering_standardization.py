@@ -175,6 +175,40 @@ plt.title("Average Confusion Matrix")
 plt.show()
 
 
+
+# Plot the average confusion matrix with black and white colormap
+plt.figure(figsize=(6, 6))  # Adjust size as needed
+
+plt.imshow(average_matrix, cmap='Greys_r')
+
+# Set tick labels
+plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
+plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
+
+# Axis labels
+plt.xlabel("Predicted Cluster Labels")
+plt.ylabel("True Cluster Labels")
+
+# Add text annotations to each cell
+for i in range(average_matrix.shape[0]):
+    for j in range(average_matrix.shape[1]):
+        val = average_matrix[i, j]
+        text_color = 'black' if val > 0.6 else 'white'
+        
+        plt.text(j, i, f"{val:.2f}", ha='center', va='center',
+                 color=text_color, fontsize=20, fontweight='bold')
+
+
+# Add title
+plt.title("Average Confusion Matrix")
+
+# Show the plot
+plt.tight_layout()
+plt.show()
+
+
+
+
 # Perform a one-sample t-test
 t_stat, p_value = stats.ttest_1samp(accuracy_scores, 0.3)
 if p_value < 0.05:
