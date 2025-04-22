@@ -833,6 +833,29 @@ plt.show()
 plt.close(kde_overall.fig)
 
 
+
+plt.figure(figsize=(6, 20))
+plt.bar(' ', 0.21, 
+        color='lightgray',
+        edgecolor='black', 
+        linewidth=2.5
+)
+plt.ylim(0,0.5)
+# Add a point at y=0.05 with error bars
+plt.errorbar(
+    ' ', 0.05,
+    yerr=0.05,
+    fmt='o',
+    color='k',
+    capsize=0,
+    elinewidth=7,  # <-- This makes the error bar line thicker
+    markeredgewidth=9  # Optional: makes the marker border thicker too
+)
+for spine in ax.spines.values():
+    spine.set_linewidth(4)
+plt.show()
+plt.clf()
+
 from scipy.stats import chisquare
 
 # 1. Define bin edges for histogram
