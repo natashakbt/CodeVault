@@ -24,14 +24,16 @@ from scipy.spatial.distance import mahalanobis
 # Load data and get setup
 # ==============================================================================
 dirname = '/home/natasha/Desktop/clustering_data/'
-#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only events labelled by video scoring
-file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
+file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only events labelled by video scoring
+#file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
 df = pd.read_pickle(file_path)
 df = df.rename(columns={'pred_event_type': 'event_type'})
 
 unique_basenames = df['basename'].unique()
 basename_to_num = {name: idx for idx, name in enumerate(unique_basenames)}
 df['session_ind'] = df['basename'].map(basename_to_num)
+
+df.event_type = df.event_type.replace('mouth or tongue movement', 'MTMs')
 
 # Make a dataframe of just mouth or tongue movement events
 #mtm_bool = df.event_type.str.contains('mouth or tongue movement')
@@ -100,8 +102,8 @@ plt.clf()
 # ==============================================================================
 # Important inputs for UMAP of individual sessions
 # ==============================================================================
-#fixed_cluster_num = np.nan
-fixed_cluster_num = 3
+fixed_cluster_num = np.nan
+#fixed_cluster_num = 3
 iterations = 1 # Number of times to repeat UMAP reduction
 
 
@@ -148,7 +150,7 @@ os.makedirs(pca_dir, exist_ok=True)
 png_files = glob.glob(os.path.join(pca_dir, '*.png'))
 for file in png_files:
     os.remove(file)
-    
+       
 # Create directory 
 mahal_dir = os.path.join(pca_dir, 'mahalanobis_matrix')
 os.makedirs(mahal_dir, exist_ok=True)
