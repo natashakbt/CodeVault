@@ -24,8 +24,8 @@ from scipy.spatial.distance import mahalanobis
 # Load data and get setup
 # ==============================================================================
 dirname = '/home/natasha/Desktop/clustering_data/'
-file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only events labelled by video scoring
-#file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
+#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only events labelled by video scoring
+file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
 df = pd.read_pickle(file_path)
 df = df.rename(columns={'pred_event_type': 'event_type'})
 
@@ -36,7 +36,6 @@ df['session_ind'] = df['basename'].map(basename_to_num)
 df.event_type = df.event_type.replace('mouth or tongue movement', 'MTMs')
 
 # Make a dataframe of just mouth or tongue movement events
-#mtm_bool = df.event_type.str.contains('mouth or tongue movement')
 mtm_bool = df.event_type.str.contains('MTMs')
 mtm_df = df.loc[mtm_bool]
 
@@ -52,7 +51,9 @@ os.makedirs(clust_dir, exist_ok=True)
 png_files = glob.glob(os.path.join(clust_dir, '*.png'))
 for file in png_files:
     os.remove(file)
-  
+    
+    
+# %%
 # ==============================================================================
 # UMAP of all MTMs in all sessions
 # ==============================================================================
@@ -99,13 +100,6 @@ plt.savefig(bic_all_path)
 plt.clf()   
 
 
-# ==============================================================================
-# Important inputs for UMAP of individual sessions
-# ==============================================================================
-fixed_cluster_num = np.nan
-#fixed_cluster_num = 3
-iterations = 1 # Number of times to repeat UMAP reduction
-
 
 # %% Define functions
 # ==============================================================================
@@ -140,6 +134,17 @@ def calc_mahalanobis_distance_matrix(mtm_session_df):
 
 
 # %% # Run GMM on PCA of MTMs in individual sessions WITH MAHALANOBIS DISTANCE
+
+# ==============================================================================
+# Important inputs for clustering of individual sessions
+# ==============================================================================
+fixed_cluster_num = np.nan
+#fixed_cluster_num = 3
+iterations = 50# Number of times to repeat UMAP reduction
+
+
+
+
 # ==============================================================================
 # Run GMM on PCA of MTMs in individual sessions WITH MAHALANOBIS DISTANCE
 # ==============================================================================
@@ -182,8 +187,8 @@ else:
 
 # PCA with GMM on a session-by-session basis
 for session in df.session_ind.unique():
-    #if session == 0:
-    #    continue
+    if session == 0:
+        continue
     for i in range(iterations):
         # Filter data for the current session
         mtm_session_bool = mtm_df.session_ind == session
@@ -212,7 +217,10 @@ for session in df.session_ind.unique():
         if np.isnan(fixed_cluster_num):
             pw_fit = piecewise_regression.Fit(n_components_range, bic_scores, n_breakpoints=1)
             pw_results = pw_fit.get_results()
-            breakpoint1 = pw_results["estimates"]["breakpoint1"]["estimate"]
+            if pw_results["converged"] == False:
+                breakpoint1 = bic_scores.index(min(bic_scores))
+            else:
+                breakpoint1 = pw_results["estimates"]["breakpoint1"]["estimate"]
             optimal_n_components = round(breakpoint1)
             optimal_cluster_list.append(breakpoint1)
         else:
@@ -231,7 +239,7 @@ for session in df.session_ind.unique():
         df.loc[(df.session_ind == session) & (df.event_type == 'MTMs'), 'cluster_num'] = labels
         
         test = df.loc[(df.session_ind == session) & (df.event_type == 'MTMs'), 'cluster_num']
-        print(sum(np.isnan(test)))
+        #print(sum(np.isnan(test)))
         
         
         mtm_session_df['cluster_num'] = labels 
@@ -283,7 +291,7 @@ for session in df.session_ind.unique():
             plt.savefig(mahal_session_path)
             plt.clf()
       
-## Histogram of 
+## Histogram of mahalanobis diagonal vs non-diag values
 bin_edges = np.linspace(min(mahal_matrix.flatten()), max(mahal_matrix.flatten()), num=31)  # 20 bins
 
 plt.hist(diag_elements, bins=bin_edges, 
@@ -327,10 +335,10 @@ mode_result = stats.mode(optimal_cluster_list, keepdims=False)
 print(f"The mode is: {mode_result[0]}")
     
 #plt.hist(optimal_cluster_list, bins=len(n_components_range), 
-plt.hist(optimal_cluster_list, bins=20,
+plt.hist(optimal_cluster_list, bins=15,
          color='cornflowerblue', 
          edgecolor='black')
-plt.axvline(x=mode_result[0]+0.3, 
+plt.axvline(x=mode_result[0], 
             color='red', 
             linestyle='--', 
             linewidth=2)
@@ -341,7 +349,22 @@ histogram_path = os.path.join(pca_dir, 'optimal_clusters_histogram.png')
 plt.savefig(histogram_path)
 plt.show()
     
-
+rounded_numbers = [round(num) for num in optimal_cluster_list]
+#plt.hist(optimal_cluster_list, bins=len(n_components_range), 
+plt.hist(rounded_numbers,bins = 3,
+         color='cornflowerblue', 
+         edgecolor='black')
+plt.axvline(x=mode_result[0], 
+            color='red', 
+            linestyle='--', 
+            linewidth=2)
+plt.xlabel('Optimal Number of Clusters')
+plt.ylabel('Frequency')
+plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
+#  histogram_path = os.path.join(pca_dir, 'optimal_clusters_histogram.png')
+#plt.savefig(histogram_path)
+plt.show()
+    
 
 # %% # Assign cluster numbers to events and save new dataframe
 # ==============================================================================
@@ -371,7 +394,7 @@ print(f"DataFrame successfully saved to {output_file_path}")
 # ==============================================================================
 # Run GMM on UMAP of MTMs in individual sessions - OBSOLETE
 # ==============================================================================
-'''
+
 # Create directory 
 umap_dir = os.path.join(clust_dir, 'UMAP_results')
 os.makedirs(umap_dir, exist_ok=True)
@@ -431,7 +454,6 @@ for session in df.session_ind.unique():
         optimal_gmm.fit(embedding)
         labels = optimal_gmm.predict(embedding)
 
- v
         # For speed, only create individual session plots for the first iteration
         if i == 0:
             # Another scatter plot where colors based on the 'yes' or 'no' in 'multimodal' column
@@ -501,6 +523,6 @@ plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
 histogram_path = os.path.join(umap_dir, 'optimal_clusters_histogram.png')
 plt.savefig(histogram_path)
 plt.show()
-'''
+
 
 
