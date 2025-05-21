@@ -1426,6 +1426,35 @@ for taste, taste_df in taste_groups:
     plt.close()
 
 
+# %% DISTRIBUTION OF before/after events
+from sklearn.preprocessing import StandardScaler
+import umap
+
+mtm_df = filtered_df = transition_events_df[transition_events_df['event_type'] == 'MTMs']
+
+
+reducer = umap.UMAP()
+n_components_range = list(range(1, 15))  # Define a range of cluster numbers to test
+
+# UMAP with GMM on a session-by-session basis
+for session in df.session_ind.unique():
+    
+    mtm_session_bool = mtm_df.session_ind == session
+    mtm_session_df = mtm_df.loc[mtm_session_bool].copy()  # Make a copy to avoid SettingWithCopyWarning
+    mtm_session_features = np.stack(mtm_session_df.features.values)
+
+    scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features)  # Scale features
+    embedding = reducer.fit_transform(scaled_mtm_session)  # UMAP embedding
+    
+    sns.displot(embedding[:, 0], embedding[:, 1], hue= )
+    #scatter = plt.scatter(embedding[:, 0], embedding[:, 1])
+    plt.title(f'Session {session}: UMAP projection')
+    cbar = plt.colorbar(scatter) 
+    cbar.set_ticks([])  # Set specific tick positions
+
+
+    plt.show()
+
 
 # %% WHAT IS THIS CRAP
 # TODO: FIGURE OUT WHAT ALL THIS CRAP BELOW IS DOING. DO I NEED IT?
