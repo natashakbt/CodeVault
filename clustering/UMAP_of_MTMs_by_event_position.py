@@ -13,19 +13,21 @@ import os
 import math
 import matplotlib.pyplot as plt
 import glob
-from scipy.stats import chi2_contingency
-from scipy.stats import zscore
+from scipy.stats import chi2_contingency, zscore, ttest_rel, chisquare, power_divergence, percentileofscore
+import scipy.stats as stats
 import seaborn as sns
 from matplotlib.legend_handler import HandlerTuple
 import shutil
 from scipy.interpolate import make_interp_spline, BSpline
-from scipy.ndimage import gaussian_filter1d  # for smoothing
+from scipy.ndimage import gaussian_filter1d
 from scipy.optimize import curve_fit
 import piecewise_regression
-from scipy.stats import ttest_rel
-import scipy.stats as stats
 import umap
 from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
+from scipy.ndimage import gaussian_filter
+from matplotlib.colors import TwoSlopeNorm
+
 
 # ==============================================================================
 # Load data and get setup
@@ -195,57 +197,169 @@ for idx, row in transition_events_df.iterrows():
 # UMAP of waveforms by test session
 # ==============================================================================
 
+
+fig_dir = os.path.join(dirname, 'UMAP_of_MTMs_by_event_position')
+os.makedirs(fig_dir, exist_ok=True)
+
+files = glob.glob(os.path.join(fig_dir, '*'))
+for file in files:
+    os.remove(file)  # Remove each file
+
+
+p_val_dict = {}
+n_iterations = 10
+
 unique_sessions = transition_events_df['basename'].unique()
-for basename in unique_sessions:
-    session_df = transition_events_df[transition_events_df['basename'] == basename]
-    mtm_df = session_df[session_df['event_type'] == 'MTMs']
-    mtm_features = np.stack(mtm_df.raw_features.values)
+for n in tqdm(range(n_iterations)):
+    for basename in unique_sessions:
+        session_df = transition_events_df[transition_events_df['basename'] == basename]
+        mtm_df = session_df[session_df['event_type'] == 'MTMs']
+        mtm_features = np.stack(mtm_df.raw_features.values)
+        
+        # UMAP dimmentionality reduction and feature scaling
+        reducer = umap.UMAP()
+        scaled_mtm_features = StandardScaler().fit_transform(mtm_features) # Scale features
+        embedding = reducer.fit_transform(scaled_mtm_features) # UMAP embedding
     
-    # UMAP dimmentionality reduction and feature scaling
-    reducer = umap.UMAP()
-    scaled_mtm_features = StandardScaler().fit_transform(mtm_features) # Scale features
-    embedding = reducer.fit_transform(scaled_mtm_features) # UMAP embedding
-    
-    0
-    # Plot the UMAP projections with optimal GMM clusters
-    #plt.scatter(embedding[:,0], embedding[:,1], s=5)
-    mtm_df = mtm_df.reset_index(drop=True)
-    embedding_df = pd.DataFrame({
-        'x': embedding[:, 0],
-        'y': embedding[:, 1],
-        'event_position': mtm_df['event_position'].values
-    })
-    
-    before_values = embedding_df[embedding_df['event_position'] == 'before']
+        # Plot the UMAP projections with optimal GMM clusters
+        mtm_df = mtm_df.reset_index(drop=True)
+        embedding_df = pd.DataFrame({
+            'x': embedding[:, 0],
+            'y': embedding[:, 1],
+            'event_position': mtm_df['event_position'].values
+        })
+        
+        if n == 0:
+            plt.clf()
+            g = sns.displot(
+                data=embedding_df,
+                x='x',
+                y='y',
+                hue='event_position',
+                kind='kde',
+                height=6,
+                aspect=1
+            )
+            g.fig.suptitle(f'{basename}')
+            fig_path = os.path.join(fig_dir, f'{basename}_countour_plot.png')
+            plt.savefig(fig_path)
+            
+        before_values = embedding_df[embedding_df['event_position'] == 'before']
+        after_values = embedding_df[embedding_df['event_position'] == 'after']
+        
+        bin_num = 10
+        hb = plt.hist2d(before_values['x'], 
+            before_values['y'], 
+            bins = bin_num, 
+            density=True
+            )
+        ha = plt.hist2d(after_values['x'], 
+            after_values['y'], 
+            bins = bin_num, 
+            density = True
+            )
+        
+        h_result = hb[0] - ha[0]
+        h_mask = (ha[0] >0 *1) + (hb[0]>0 * 1)
+        # plt.imshow(h_mask*1)
+        
+        hresult_flat = h_result[h_mask].flatten()
+        actual_stat = np.abs(hresult_flat).sum()
+        if n == 0:
+            # For Abu: Does this plot the difference between after and before?
+            #plt.clf()
+            #plt.contourf(ha[1][:-1], ha[2][:-1], h_result); plt.colorbar() 
+            #plt.show()
+ 
+            # Plot h_result as a matrix
+            #plt.clf()
+            #plt.imshow(h_result, cmap = 'RdBu')
+            #plt.colorbar(label='Before - After Values')
+            #plt.title(f'{basename} \nbins={bin_num}')
+            #plt.show()
+            
+            # Plot h_result, but smoothed
+            h_result_smooth = gaussian_filter(h_result, sigma=1.0)
+            
+            plt.clf()
+            plt.contourf(
+                ha[1][:-1], ha[2][:-1], h_result_smooth,
+                levels=100,
+                cmap='RdBu_r',
+                norm=TwoSlopeNorm(vcenter=0) # Make sure white is 0
+            )
+            plt.colorbar(label='Smoothed Before - After Density\ncentered on 0')
+            plt.title(f'{basename}\nSmoothed Histogram Difference')
+            fig_path = os.path.join(fig_dir, f'{basename}_smooth_difference.png')
+            plt.savefig(fig_path)
 
+        # chi2_statistic, p_value = chisquare(
+        #     hresult_flat,
+        #     f_exp = np.ones(len(hresult_flat)*1e-6)
+        #     )
+        
+        # chi2_statistic, p_value = power_divergence(
+        #     hresult_flat,
+        #     f_exp = np.zeros(len(hresult_flat))
+        #     )
+    
+        #print("Chi-square statistic:", chi2_statistic)
+        #print("P-value:", p_value)
+        
+        n_boot = 1000
+        sh_stat = []
+        merged_df = pd.concat([before_values, after_values], axis = 0)
+        for i_shuff in range(n_boot):
+            before_sh = merged_df.sample(n=len(before_values))
+            after_sh = merged_df.sample(n=len(after_values))
+            
+            hb_sh = plt.hist2d(before_sh['x'], 
+                before_sh['y'], 
+                bins = bin_num, 
+                density=True
+            )
+            ha_sh = plt.hist2d(after_sh['x'], 
+                after_sh['y'], 
+                bins = bin_num, 
+                density = True
+            )
+            
+            h_result_sh = hb_sh[0] - ha_sh[0]
+            h_mask_sh = (ha_sh[0] >0 *1) + (hb_sh[0]>0 * 1)
 
-    after_values = embedding_df[embedding_df['event_position'] == 'after']
+            hresult_flat_sh = h_result_sh[h_mask_sh].flatten()
+            sh_stat.append(np.abs(hresult_flat_sh).sum())
+            
+        divergence_p = 1 - (percentileofscore(sh_stat, actual_stat)/100)
+            
+        plt.hist(sh_stat);plt.axvline(actual_stat, c = 'red', linestyle = '--')
+        # print(divergence_p)
+        if basename not in p_val_dict:
+            p_val_dict[basename] = []
+        p_val_dict[basename].append(divergence_p)
     
-    bin_num = 15
-    hb = plt.hist2d(before_values['x'], before_values['y'], bins = bin_num)
-    ha = plt.hist2d(after_values['x'], after_values['y'], bins = bin_num)
-    
-    h_result = hb[0] - ha[0]
-    
-    plt.clf()
-    '''
-    plt.imshow(h_result, cmap = 'RdBu', vmin=-12, vmax=12)
-    plt.colorbar(label='Before - After Values')
-    plt.title(f'{basename} \nbins={bin_num}')
-    '''
-    g = sns.displot(
-        data=embedding_df,
-        x='x',
-        y='y',
-        hue='event_position',
-        kind='kde',
-        height=6,
-        aspect=1
-    )
+        plt.clf()
+        
 
-    g.fig.suptitle(f'{basename}')
-    plt.show()
-    plt.clf()
+# Convert the dictionary into a tidy DataFrame
+plot_df = pd.DataFrame([
+    {'basename': key, 'divergence_p': val}
+    for key, vals in p_val_dict.items()
+    for val in vals
+])
+
+# Plot
+plt.figure(figsize=(10, 5))
+sns.stripplot(data=plot_df, x='basename', y='divergence_p', jitter=True)
+plt.axhline(y=0.05, color='red', linestyle='--', label='p = 0.05')  
+
+plt.xticks(rotation=45)
+plt.title("Divergence P-values by Session")
+plt.ylabel("Divergence P-value")
+plt.xlabel("Session (basename)")
+plt.tight_layout()
+fig_path = os.path.join(fig_dir, 'divergence_p_values.png')
+plt.savefig(fig_path)
 
 
 # %% UMAP of all MTM features
