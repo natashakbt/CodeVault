@@ -102,7 +102,7 @@ def standardize_labels(this_vector_df, next_basename, processed_basenames):
         df.loc[(df['basename'] == next_basename) & (df['cluster_num'] == next_cluster), 'new_cluster_num'] = this_cluster
         print(f"{next_cluster} → {this_cluster}")
 
-    # Update average vectors to be a combination of 
+    # Update average vectors to be a combination of the two sessions
     for cluster in cluster_range:
         combined_df = pd.concat([
             df[(df['basename'] == b) & (df['cluster_num'] == cluster)] for b in processed_basenames

@@ -221,7 +221,7 @@ for n in tqdm(range(n_iterations)):
         scaled_mtm_features = StandardScaler().fit_transform(mtm_features) # Scale features
         embedding = reducer.fit_transform(scaled_mtm_features) # UMAP embedding
     
-        # Plot the UMAP projections with optimal GMM clusters
+        # Plot the UMAP projections
         mtm_df = mtm_df.reset_index(drop=True)
         embedding_df = pd.DataFrame({
             'x': embedding[:, 0],
@@ -267,16 +267,16 @@ for n in tqdm(range(n_iterations)):
         actual_stat = np.abs(hresult_flat).sum()
         if n == 0:
             # For Abu: Does this plot the difference between after and before?
-            #plt.clf()
-            #plt.contourf(ha[1][:-1], ha[2][:-1], h_result); plt.colorbar() 
-            #plt.show()
+            plt.clf()
+            plt.contourf(ha[1][:-1], ha[2][:-1], h_result); plt.colorbar() 
+            plt.show()
  
             # Plot h_result as a matrix
-            #plt.clf()
-            #plt.imshow(h_result, cmap = 'RdBu')
-            #plt.colorbar(label='Before - After Values')
-            #plt.title(f'{basename} \nbins={bin_num}')
-            #plt.show()
+            plt.clf()
+            plt.imshow(h_result, cmap = 'RdBu')
+            plt.colorbar(label='Before - After Values')
+            plt.title(f'{basename} \nbins={bin_num}')
+            plt.show()
             
             # Plot h_result, but smoothed
             h_result_smooth = gaussian_filter(h_result, sigma=1.0)
