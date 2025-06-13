@@ -72,8 +72,208 @@ y = features_expanded["cluster_num"]
 
 
 
-# %% ONE WAY TO DO NCA
 
+
+# %% TRAINING SVM + PLOTTING CONFUSION MATRIX
+# ==============================================================================
+# Training SVM
+# ==============================================================================
+
+
+all_high_conf_waveforms = []
+
+accuracy_scores = []
+confusion_matrices = []
+# Train the classifier 10x
+for i in tqdm(range(10)):
+    # Split the dataset into 80% training and 20% testing
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, stratify=y)
+    
+    test_indices = X_test.index
+    
+    rbf_svc = svm.SVC(kernel='rbf', probability=True) # Non-linear
+    rbf_svc.fit(X_train, y_train)
+    
+    y_pred = rbf_svc.predict(X_test) 
+    y_proba = rbf_svc.predict_proba(X_test)
+
+    #print("Accuracy:", metrics.accuracy_score(y_test, y_pred))
+    accuracy_scores.append(metrics.accuracy_score(y_test, y_pred))
+    
+    matrix = confusion_matrix(y_test, y_pred, normalize='pred')
+    confusion_matrices.append(matrix)  # Store the matrix
+    
+    '''
+    plt.imshow(matrix)
+    plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
+    plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
+
+    plt.xlabel("Predicted Cluster Labels")
+    plt.ylabel("True Cluster Labels")
+    cbar = plt.colorbar()
+    cbar.set_label('Normalized Accuracy')
+    
+    plt.show()
+    '''
+    confidences = np.max(y_proba, axis=1)
+    high_conf_mask = confidences >= 0.9
+    
+    # Get original indices for high-confidence predictions
+    high_conf_indices = test_indices[high_conf_mask]
+    
+    # Pull the waveforms from df
+    waveforms = df.loc[high_conf_indices, 'segment_norm_interp']
+    waveforms = df.loc[high_conf_indices, 'segment_raw']
+    
+    waveform_data = pd.DataFrame({
+        'waveform': waveforms,
+        'true_label': y_test.loc[high_conf_indices].values,
+        'pred_label': y_pred[high_conf_mask],
+        'confidence': confidences[high_conf_mask]
+    })
+    all_high_conf_waveforms.append(waveform_data)
+
+# ==============================================================================
+# Plotting waveforms
+# ==============================================================================
+
+final_waveforms_df = pd.concat(all_high_conf_waveforms, ignore_index=True)
+final_waveforms_df = final_waveforms_df[
+    final_waveforms_df['true_label'] == final_waveforms_df['pred_label']
+]
+
+mean_waveforms = []
+# Group waveforms by true_label
+for label in sorted(final_waveforms_df['true_label'].unique()):
+    group = final_waveforms_df[final_waveforms_df['true_label'] == label]
+    print(len(group))
+    plt.figure(figsize=(8, 4))
+    for waveform in group['waveform']:
+        plt.plot(waveform, alpha=0.2, color='gray')
+    
+    # Optionally: Add mean waveform
+    mean_waveform = np.mean(np.stack(group['waveform'].values), axis=0)
+    mean_waveforms.append(mean_waveform)
+    
+   #plt.plot(mean_waveform, color='black', linewidth=2, label='Mean waveform')
+    
+    plt.title(f"Overlayed Waveforms for Cluster {label}")
+    plt.tight_layout()
+    plt.show()
+
+for w in mean_waveforms:
+    plt.plot(w)
+plt.title("Mean of 90% confidence waveforms")
+plt.show()
+
+
+
+
+# TAKE TOP 10 CONFIDENCE WAVEFORMS IN EACH CLUSTER AND PLOT
+top_waveforms_by_cluster = []
+
+for label in sorted(final_waveforms_df['pred_label'].unique()):
+    top10 = (
+        final_waveforms_df[final_waveforms_df['pred_label'] == label]
+        .sort_values(by='confidence', ascending=False)
+        .head(10)
+    )
+    top_waveforms_by_cluster.append(top10)
+
+# Combine into one DataFrame
+top_waveforms_df = pd.concat(top_waveforms_by_cluster)
+
+
+
+# Loop through each predicted cluster
+for label in sorted(final_waveforms_df['pred_label'].unique()):
+    # Get top 10 waveforms for this cluster by confidence
+    top10 = (
+        final_waveforms_df[final_waveforms_df['pred_label'] == label]
+        .sort_values(by='confidence', ascending=False)
+        .head(10)
+    )
+
+    plt.figure(figsize=(8, 4))
+    
+    for i, waveform in enumerate(top10['waveform']):
+        plt.plot(waveform, alpha=0.8, label=f"Waveform {i+1}", color='k')
+    
+    plt.title(f"Top 10 Most Confident Waveforms (Predicted Cluster {label})")
+
+    plt.tight_layout()
+    plt.show()
+
+# ==============================================================================
+# Confusion matrix + stat of SVM accuracy
+# ==============================================================================
+
+
+# Building average confusion matrix and std
+matrices_as_array = np.array(confusion_matrices)
+average_matrix = matrices_as_array.mean(axis=0)
+std_matrix = matrices_as_array.std(axis=0) # TODO IS THIS THE RIGHT W
+
+# Plot the average confusion matrix with black and white colormap
+plt.figure(figsize=(10, 10))  # Adjust size as needed
+plt.imshow(average_matrix, cmap='Greys_r')
+
+# Set tick labels
+plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
+plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
+
+# Axis labels
+plt.xlabel("Predicted Cluster Labels")
+plt.ylabel("True Cluster Labels")
+
+# Add text annotations to each cell
+for i in range(average_matrix.shape[0]):
+    for j in range(average_matrix.shape[1]):
+        mean_val = average_matrix[i, j]
+        std_val = std_matrix[i, j]
+        
+        text = f"{mean_val:.2f}\n±{std_val:.2f}"
+        text_color = 'black' if mean_val > 0.6 else 'white'
+        
+        plt.text(j, i, text, ha='center', va='center',
+                 color=text_color, fontsize=30, fontweight='bold')
+
+
+# Add title
+plt.title("Average Confusion Matrix")
+
+# Show the plot
+plt.tight_layout()
+plt.show()
+
+
+# Perform a one-sample t-test
+t_stat, p_value = stats.ttest_1samp(accuracy_scores, 0.3)
+if p_value < 0.05:
+    print(f'The mean accuracy is significantly above 0.3 (p-value: {p_value})')
+else:
+    print('The mean accuracy is not significantly different from chance!')
+
+
+# %% MEASURING WAVEFORM METRICS
+# ==============================================================================
+# Measuring waveform metrics
+# Negative gradient, positive gradient, amplitude, width (50%), area under the curve
+# symmetry (pearson's r), skew
+# ==============================================================================
+
+new_columns = ['amplitude', 'pos_grad', 'neg_grad', 'width', 
+               'area', 'symmetry', 'skew']  # Add more as needed
+final_waveforms_df[new_columns] = pd.NA  # or use np.nan if preferred
+
+for row in final_waveforms_df.iterrows():
+    waveform= row['waveform']
+    
+
+
+# %% ONE WAY TO DO NCA
+# NOT NEEDED
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 nca = NeighborhoodComponentsAnalysis(random_state=0)
@@ -94,6 +294,7 @@ print(knn.score(nca.transform(X_test), y_test))
 
 
 # %% ANOTHER WAY TO DO NCA
+# NOT NEEDED 
 n_neighbors = 3
 random_state = 0
 
@@ -124,101 +325,9 @@ plt.title(
 )
 plt.show()
 
-# %% TRAINING SVM + PLOTTING CONFUSION MATRIX
-# ==============================================================================
-# Training SVM
-# ==============================================================================
-
-accuracy_scores = []
-confusion_matrices = []
-# Train the classifier 10x
-for i in tqdm(range(10)):
-    # Split the dataset into 80% training and 20% testing
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-     
-    rbf_svc = svm.SVC(kernel='rbf') # Non-linear
-    rbf_svc.fit(X_train, y_train)
-    
-    y_pred = rbf_svc.predict(X_test) 
-    
-
-    #print("Accuracy:", metrics.accuracy_score(y_test, y_pred))
-    accuracy_scores.append(metrics.accuracy_score(y_test, y_pred))
-    
-    matrix = confusion_matrix(y_test, y_pred, normalize='pred')
-    confusion_matrices.append(matrix)  # Store the matrix
-    
-    plt.imshow(matrix)
-    plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
-    plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
-
-    plt.xlabel("Predicted Cluster Labels")
-    plt.ylabel("True Cluster Labels")
-    cbar = plt.colorbar()
-    cbar.set_label('Normalized Accuracy')
-    
-    plt.show()
-
-average_matrix = np.mean(confusion_matrices, axis=0)
-
-# Plot the average confusion matrix
-plt.imshow(average_matrix, cmap='Blues')
-plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
-plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
-
-plt.xlabel("Predicted Cluster Labels")
-plt.ylabel("True Cluster Labels")
-cbar = plt.colorbar()
-cbar.set_label('Normalized Accuracy')
-
-plt.title("Average Confusion Matrix")
-plt.show()
-
-
-
-# Plot the average confusion matrix with black and white colormap
-plt.figure(figsize=(6, 6))  # Adjust size as needed
-
-plt.imshow(average_matrix, cmap='Greys_r')
-
-# Set tick labels
-plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
-plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
-
-# Axis labels
-plt.xlabel("Predicted Cluster Labels")
-plt.ylabel("True Cluster Labels")
-
-# Add text annotations to each cell
-for i in range(average_matrix.shape[0]):
-    for j in range(average_matrix.shape[1]):
-        val = average_matrix[i, j]
-        text_color = 'black' if val > 0.6 else 'white'
-        
-        plt.text(j, i, f"{val:.2f}", ha='center', va='center',
-                 color=text_color, fontsize=20, fontweight='bold')
-
-
-# Add title
-plt.title("Average Confusion Matrix")
-
-# Show the plot
-plt.tight_layout()
-plt.show()
-
-
-
-
-# Perform a one-sample t-test
-t_stat, p_value = stats.ttest_1samp(accuracy_scores, 0.3)
-if p_value < 0.05:
-    print(f'The mean accuracy is significantly above 0.3 (p-value: {p_value})')
-else:
-    print('The mean accuracy is not significantly different from chance!')
-
-
 
 #%%
+## CODE BELOW DOESN'T WORK
 from sklearn.decomposition import PCA
 
 def plot_training_data_with_decision_boundary(
