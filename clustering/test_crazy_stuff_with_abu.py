@@ -69,6 +69,149 @@ X_pca_from_df = np.array([features[-3:] for features in check_filtered_df['raw_f
 # Check if they're close?
 np.allclose(X_pca_check, X_pca_from_df)
 
+# =============================================================================
+# Reconstructing single dimensions of PCA
+# =============================================================================
+min_pc = X_pca_check.min(axis=0)
+max_pc = X_pca_check.max(axis=0)
+
+X,Y = np.meshgrid(
+    np.linspace(-2,2, 5),
+    np.linspace(2,-2, 5),
+    )
+
+# x_list = []
+# y_list = []
+recon_list = []
+# for this_x, this_y in zip(X.flatten(), Y.flatten()):
+for ind_1 in range(X.shape[0]):
+    for ind_2 in range(X.shape[1]):
+        this_x = X[ind_1, ind_2]
+        this_y = Y[ind_1, ind_2]
+        recon = pca_obj.inverse_transform([this_x, this_y, 0])
+        x_list.append(this_x)
+        y_list.append(this_y)
+        recon_list.append(recon)
+        
+fig, ax = plt.subplots(*X.shape,
+                       sharex=True,
+                       sharey=True,
+                       figsize = (10,10))
+count = 0
+for ind_1 in range(X.shape[0]):
+    for ind_2 in range(X.shape[1]):
+        this_x = X[ind_1, ind_2]
+        this_y = Y[ind_1, ind_2]
+        ax[ind_1, ind_2].plot(recon_list[count])
+        ax[ind_1, ind_2].set_title(f"PC0 = {this_x}, PC1 = {this_y}")
+        count += 1
+plt.tight_layout()
+
+###############
+
+
+
+
+
+
+PC0_vals = []
+PC1_vals = []
+cluster_labels = []
+
+for idx, row in check_filtered_df.iterrows():
+    PC0_vals.append(row['features'][-3])
+    PC1_vals.append(row['features'][-2])
+    cluster_labels.append(row['cluster_num'])
+
+plt.figure(figsize=(10,10))
+scatter = plt.scatter(PC0_vals, PC1_vals, c=cluster_labels, cmap='viridis', alpha=0.7)
+plt.xlim(-2,2)
+plt.ylim(-2,2)
+plt.xlabel("PC0")
+plt.ylabel("PC1")
+
+
+# Compute cluster means
+df_plot = pd.DataFrame({
+    'PC0': PC0_vals,
+    'PC1': PC1_vals,
+    'cluster': cluster_labels
+})
+cluster_means = df_plot.groupby('cluster')[['PC0', 'PC1']].mean()
+cluster_means = cluster_means.reset_index()
+
+cmap = plt.get_cmap('viridis')
+norm = plt.Normalize(min(cluster_labels), max(cluster_labels))
+colors = cmap(norm(cluster_means['cluster'].values))
+
+
+# Plot the cluster means as large red dots
+plt.scatter(cluster_means['PC0'], 
+            cluster_means['PC1'], 
+            facecolors = colors, 
+            s=200, 
+            marker='o', 
+            edgecolors='black')
+
+plt.legend()
+plt.title("PC0 vs PC1 Colored by Cluster")
+plt.show()
+
+###############
+
+
+from sklearn.neighbors import KernelDensity
+
+
+density_centers = []
+
+# Convert to DataFrame
+df_plot = pd.DataFrame({
+    'PC0': PC0_vals,
+    'PC1': PC1_vals,
+    'cluster': cluster_labels
+})
+
+for cluster_id in sorted(df_plot['cluster'].unique()):
+    cluster_points = df_plot[df_plot['cluster'] == cluster_id][['PC0', 'PC1']].values
+
+    # Fit KDE
+    kde = KernelDensity(bandwidth=0.1, kernel='gaussian')
+    kde.fit(cluster_points)
+
+    # Score the density of each point
+    log_dens = kde.score_samples(cluster_points)
+
+    # Find the point with highest density
+    max_idx = np.argmax(log_dens)
+    densest_point = cluster_points[max_idx]
+    
+    density_centers.append(densest_point)
+
+density_centers = np.array(density_centers)
+
+
+
+
+plt.figure(figsize=(10,10))
+scatter = plt.scatter(PC0_vals, PC1_vals, c=cluster_labels, cmap='viridis', alpha=0.7)
+plt.xlim(-2,2)
+plt.ylim(-2,2)
+plt.xlabel("PC0")
+plt.ylabel("PC1")
+
+
+plt.scatter(
+    density_centers[:, 0], density_centers[:, 1],
+    facecolors='red',
+    edgecolors='black',
+    s=300,
+    linewidths=2,
+    marker='X',
+    label='KDE Peak'
+)
+plt.legend()
+plt.show()
 
 # =============================================================================
 # 

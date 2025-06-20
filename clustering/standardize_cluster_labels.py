@@ -15,7 +15,7 @@ import glob
 from scipy.stats import chi2_contingency
 from scipy.stats import zscore
 import seaborn as sns
-from matplotlib.legend_handler import      
+#from matplotlib.legend_handler import# WHAT WAS HERE? 
 import shutil
 from scipy.interpolate import make_interp_spline, BSpline
 from scipy.ndimage import gaussian_filter1d  # for smoothing
@@ -33,6 +33,7 @@ import umap
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
+from scipy.stats import gaussian_kde
 
 # TODO: I THINK THIS CODE DOESN'T WORK AFTER THE LABELS HAVE BEEN STANDARDIZED ALREADY.
 # MAKE IT RE-RUN-ABLE FRIENDLY
@@ -408,7 +409,7 @@ ax.legend()
 plt.show()
 plt.close(fig)
 
-# %% UMAP - IN PROGRESS
+# %% UMAP
 
 # ==============================================================================
 # Plot UMAP of waveforms, clustered by GMM 
@@ -486,6 +487,140 @@ colors = [color_mapping[cluster] for cluster in cluster_nums]
 plt.figure(figsize=(10, 8))
 plt.scatter(embedding[:, 0], embedding[:, 1], c=colors, s=50, edgecolor='k', alpha=0.7)
 plt.title('UMAP Scatter Plot of Waveforms')
+plt.xlabel('UMAP 1')
+plt.ylabel('UMAP 2')
+
+# Optionally, add a legend or colorbar
+plt.show()
+
+
+# ============================================= =================================
+# Plotting just specific cluster_num
+# ==============================================================================
+prototypical_waveforms = []
+center_points = []
+cluster_cycle = [0, 1, 2]
+reset_filtered_df = filtered_df.reset_index(drop=True)
+for single_cluster_num in cluster_cycle:
+    # Filter for a specific cluster
+    cluster_0_df = reset_filtered_df[reset_filtered_df['cluster_num'] == single_cluster_num]
+    cluster_0_indices = cluster_0_df.index
+    
+    # Filter the UMAP embedding array to only include those rows
+    embedding_0 = embedding[cluster_0_indices]
+    
+    # Define color just for cluster 0
+    color_0 = color_mapping[single_cluster_num]
+    colors_0 = [color_0] * len(cluster_0_df)
+    
+    # Create scatter plot of waveforms in UMAP space
+    plt.figure(figsize=(10, 8))
+    plt.scatter(embedding_0[:, 0], embedding_0[:, 1], c=colors_0, s=50, edgecolor='k', alpha=0.7)
+    plt.title(f'UMAP Scatter Plot - Cluster {single_cluster_num} Only')
+    plt.xlabel('UMAP 1')
+    plt.ylabel('UMAP 2')
+    plt.show()
+    
+    '''
+    # KDE density
+    umap_df = pd.DataFrame({
+        'UMAP1': embedding_0[:, 0],
+        'UMAP2': embedding_0[:, 1]
+    })
+    
+    plt.figure(figsize=(10, 8))
+    sns.kdeplot(
+        data=umap_df, x='UMAP1', y='UMAP2',
+        fill=True, thresh=0.05, levels=100, cmap="Blues"
+    )
+    plt.title(f'2D KDE of Cluster {single_cluster_num} in UMAP Space')
+    plt.xlabel('UMAP 1')
+    plt.ylabel('UMAP 2')
+    plt.show()
+    '''
+    
+    ### PLOT KDE WITH CENTER
+    x = embedding_0[:, 0]
+    y = embedding_0[:, 1]
+    
+    # Fit KDE
+    kde = gaussian_kde(np.vstack([x, y]))
+    
+    # Evaluate KDE on a grid
+    xmin, xmax = x.min(), x.max()
+    ymin, ymax = y.min(), y.max()
+    
+    xx, yy = np.mgrid[xmin:xmax:100j, ymin:ymax:100j]
+    positions = np.vstack([xx.ravel(), yy.ravel()])
+    density = kde(positions).reshape(xx.shape)
+    
+    # Find location of maximum density
+    max_idx = np.unravel_index(np.argmax(density), density.shape)
+    x_center = xx[max_idx]
+    y_center = yy[max_idx]
+    center_points.append([x_center, y_center])
+
+    # Plot KDE
+    plt.figure(figsize=(10, 8))
+    plt.scatter(x, y, c=color_mapping[0], s=30, alpha=0.5, label='Points')
+    plt.contourf(xx, yy, density, levels=100, cmap='Blues', alpha=0.6)
+    plt.plot(x_center, y_center, 'ro', label='Density Peak (Center)')
+    plt.xlabel('UMAP 1')
+    plt.ylabel('UMAP 2')
+    plt.title(f'Cluster {single_cluster_num} KDE')
+    plt.legend()
+    plt.show()
+    
+
+    ### FIND REAL WAVEFORM CLOSEST TO THE DENSITY CENTER
+    # Coordinates of center of density (from previous step)
+    center = np.array([x_center, y_center])
+    # Compute distances to center
+    distances = np.linalg.norm(embedding_0 - center, axis=1)
+    
+    # Index of the closest point
+    closest_index = np.argmin(distances)
+    
+    # Coordinates of the closest point
+    closest_point = embedding_0[closest_index]
+
+    closest_row = cluster_0_df.iloc[closest_index]
+
+    prototypical_waveforms.append({
+        'cluster': single_cluster_num,
+        'segment': closest_row['segment_norm_interp']
+    })
+
+#### PLOTTING PROTOTYPICAL WAVEOFORM (BASED ON KDE CENTER) FOR EACH CLUSTER
+plt.figure(figsize=(10, 7))
+
+for i, wf in enumerate(prototypical_waveforms):
+    cluster_id = wf['cluster']
+    segment = wf['segment']
+    color = color_mapping[cluster_id]
+    
+    plt.plot(segment, color=color, 
+             linewidth = 3.5,
+             label=f'Cluster {cluster_id}')
+
+plt.title('Prototypical Segments by Cluster')
+plt.xlabel('Time (ms)')
+plt.ylabel('Norm. Amplitude')
+plt.show()
+
+
+
+
+# Create the scatter plot
+plt.figure(figsize=(10, 8))
+plt.scatter(embedding[:, 0], embedding[:, 1], c=colors, s=50, edgecolor='k', alpha=0.7)
+for point in center_points:
+    x_center = point[0]
+    y_center = point[1]
+    plt.scatter(x_center, y_center, 
+                c='red', s=300, 
+                edgecolor='k', linewidth=2.5)
+plt.title('UMAP Scatter Plot of Waveforms with KDE peak')
 plt.xlabel('UMAP 1')
 plt.ylabel('UMAP 2')
 
@@ -586,6 +721,81 @@ plt.ylabel("MTM clusters", fontsize=16)
 
 plt.show()
 plt.close()
+
+
+
+plot_data = features_expanded[["cluster_num", "pca_0", "pca_1"]]
+
+
+# Calculate Euclidean norm of [pca_0, pca_1]
+plot_data['pca_magnitude'] = np.linalg.norm(plot_data[['pca_0', 'pca_1']].values, axis=1)
+
+# Sort by cluster_num, then by magnitude
+plot_data = plot_data.sort_values(by=["cluster_num", "pca_magnitude"])
+
+# Drop helper column before plotting
+plot_data = plot_data[["cluster_num", "pca_0", "pca_1"]]
+
+
+plt.figure(figsize=(12, 8))
+data1 = plot_data.copy()
+data1.loc[:, plot_data.columns != 'cluster_num'] = float('nan')
+ax = sns.heatmap(data1, cmap=color_mapping,
+                 square=False, linewidths=0, linecolor='none', 
+                 cbar=True, rasterized=True)
+
+data2 = plot_data.copy()
+data2['cluster_num'] = float('nan')
+sns.heatmap(data2, yticklabels=False, cmap='viridis', vmax=3)
+
+ax.set_xticklabels(ax.get_xticklabels(), fontsize=14)
+ax.set_yticklabels(ax.get_yticklabels(), fontsize=14)
+plt.xlabel("Features", fontsize=16)
+plt.ylabel("MTM clusters", fontsize=16)
+
+plt.show()
+plt.close()
+
+
+# Create padded version of plot_data
+wide_plot_data = pd.DataFrame()
+wide_plot_data["cluster_num"] = plot_data["cluster_num"]
+
+# Duplicate PCA columns for width
+wide_plot_data["pca_0_a"] = plot_data["pca_0"]
+wide_plot_data["pca_0_b"] = plot_data["pca_0"]
+wide_plot_data["pca_1_a"] = plot_data["pca_1"]
+wide_plot_data["pca_1_b"] = plot_data["pca_1"]
+
+# Heatmap 1: Show only cluster_num column
+data1 = wide_plot_data.copy()
+for col in data1.columns:
+    if col != 'cluster_num':
+        data1[col] = np.nan
+
+# Heatmap 2: Show PCA columns only
+data2 = wide_plot_data.copy()
+data2["cluster_num"] = np.nan
+
+# Plot
+plt.figure(figsize=(10, 10))
+ax = sns.heatmap(data1, cmap=color_mapping,
+                 cbar=False, linewidths=0, linecolor='none', 
+                 rasterized=True)
+
+sns.heatmap(data2, cmap='viridis', vmax=3,
+            cbar=True, yticklabels=False, linewidths=0, linecolor='none', 
+            rasterized=True)
+
+# Adjust labels manually
+ax.set_xticks([0.5, 2, 4])  # indexes of columns: cluster_num, pca_0_a, pca_1_a
+ax.set_xticklabels(["Cluster", "PC0", "PC1"], fontsize=22)
+#ax.set_yticklabels(ax.get_yticklabels(), fontsize=14)
+#plt.xlabel("Features", fontsize=16)
+#plt.ylabel("MTM clusters", fontsize=16)
+plt.tight_layout()
+plt.show()
+
 
 # ==============================================================================
 # Heatmap of waveforms
@@ -786,6 +996,11 @@ for feature in feature_names:
     k = 3  # number of groups (clusters)
     N = len(features_expanded)  # total number of observations
     eta_squared = (h_stat - k + 1) / (N - k)
+    
+    
+    print(feature)
+    print(f'{h_stat:.2f}, {p_value:.4f}, {eta_squared:.4f}\n')
+    
     if p_value < 0.05 :
         if eta_squared > 0.06:  # Only proceed if Kruskal-Wallis is significant
             print(f"{feature} p-value: {p_value}")

@@ -53,7 +53,7 @@ df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste
 # Important variables to set
 # ==============================================================================
 window_len = 500 # Half of the total window
-fixed_transition_time = 3000# Set to math.nan or a fixed time from stimulus delivery (2000ms+). If this is not nan it will be used over chosen transition
+fixed_transition_time = 2800# Set to math.nan or a fixed time from stimulus delivery (2000ms+). If this is not nan it will be used over chosen transition
 chosen_transition = 1 # Choose out of 0, 1, or 2 (palatability transition is 1); MAKE SURE TO SET ABOVE TO math.nan
 
 
@@ -347,19 +347,47 @@ plot_df = pd.DataFrame([
     for key, vals in p_val_dict.items()
     for val in vals
 ])
+plot_df['session'] = pd.factorize(plot_df['basename'])[0]
+
+for index, row in plot_df.iterrows():
+    basename = row['basename']
+    if basename =='km29_dual_4tastes_emg_200620_165523_copy':
+        plot_df['session'][index] = 'KM29_1'
+    elif basename =='km29_dual_4tastes_emg_200621_155031':
+        plot_df['session'][index] = 'KM29_2'
+    elif basename =='km45_5tastes_210620_113227_copy':
+        plot_df['session'][index] = 'KM45_1'
+    elif basename =='km50_5tastes_emg_210911_104510_copy':
+        plot_df['session'][index] = 'KM50_1'
+    elif basename =='km50_5tastes_emg_210913_100710_copy':
+        plot_df['session'][index] = 'KM50_2'
+    elif basename =='nb33_test1_3tastes_240308_131055':
+        plot_df['session'][index] = 'NB33_1'
+    elif basename =='nb33_test2_4tastes_240309_134153':
+        plot_df['session'][index] = 'NB33_2'       
 
 # Plot
-plt.figure(figsize=(10, 5))
-sns.stripplot(data=plot_df, x='basename', y='divergence_p', jitter=True)
-plt.axhline(y=0.05, color='red', linestyle='--', label='p = 0.05')  
+plt.figure(figsize=(10, 9))
+sns.stripplot(data=plot_df, x='session', y='divergence_p', 
+              jitter=True, s=10)
+sns.boxplot(data=plot_df, x='session', y='divergence_p', 
+            fill=False, color='black', linewidth=2, width=.5,
+            showfliers=False)
 
-plt.xticks(rotation=45)
+plt.axhline(y=0.05, color='red', linestyle='--', 
+            linewidth=4, label='p = 0.05')  
+
 plt.title("Divergence P-values by Session")
-plt.ylabel("Divergence P-value")
-plt.xlabel("Session (basename)")
-plt.tight_layout()
-fig_path = os.path.join(fig_dir, 'divergence_p_values.png')
-plt.savefig(fig_path)
+plt.ylabel("P-value", fontsize=18, labelpad=10)
+plt.ylim(-0.002, 0.055)
+plt.xlabel("Session", fontsize=18, labelpad=10)
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
+
+plt.show()
+
+
+
 
 
 # %% UMAP of all MTM features

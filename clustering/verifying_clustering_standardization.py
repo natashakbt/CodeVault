@@ -23,6 +23,10 @@ from sklearn.inspection import DecisionBoundaryDisplay
 from sklearn.neighbors import NeighborhoodComponentsAnalysis
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import make_pipeline
+import seaborn as sns
+import scikit_posthocs as sp
+from itertools import combinations
+from scipy.stats import ks_2samp
 
 # ==============================================================================
 # Load data and get setup
@@ -102,20 +106,21 @@ for i in tqdm(range(10)):
     accuracy_scores.append(metrics.accuracy_score(y_test, y_pred))
     
     matrix = confusion_matrix(y_test, y_pred, normalize='pred')
-    confusion_matrices.append(matrix)  # Store the matrix
+    confusion_matrices.append(matrix)
     
-    '''
-    plt.imshow(matrix)
-    plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
-    plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
-
-    plt.xlabel("Predicted Cluster Labels")
-    plt.ylabel("True Cluster Labels")
-    cbar = plt.colorbar()
-    cbar.set_label('Normalized Accuracy')
+    if i == 1:
+        plt.imshow(matrix)
+        plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
+        plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
     
-    plt.show()
-    '''
+        plt.xlabel("Predicted Cluster Labels")
+        plt.ylabel("True Cluster Labels")
+        cbar = plt.colorbar()
+        cbar.set_label('Normalized Accuracy')
+        
+        plt.show()
+    
+    # Pulling out the most confident (>90) waveforms. For plotting below
     confidences = np.max(y_proba, axis=1)
     high_conf_mask = confidences >= 0.9
     
@@ -233,11 +238,12 @@ for i in range(average_matrix.shape[0]):
         mean_val = average_matrix[i, j]
         std_val = std_matrix[i, j]
         
-        text = f"{mean_val:.2f}\n±{std_val:.2f}"
+        #text = f"{mean_val:.2f}\n±{std_val:.2f}"
+        text = f"{mean_val:.2f}"
         text_color = 'black' if mean_val > 0.6 else 'white'
         
         plt.text(j, i, text, ha='center', va='center',
-                 color=text_color, fontsize=30, fontweight='bold')
+                 color=text_color, fontsize=40, fontweight='bold')
 
 
 # Add title
@@ -263,132 +269,141 @@ else:
 # symmetry (pearson's r), skew
 # ==============================================================================
 
-new_columns = ['amplitude', 'pos_grad', 'neg_grad', 'width', 
-               'area', 'symmetry', 'skew']  # Add more as needed
-final_waveforms_df[new_columns] = pd.NA  # or use np.nan if preferred
+waveform_metrics_df = df
+new_columns = ['amplitude', 'area', 'width', 
+               'pos_grad', 'neg_grad', 'symmetry', 'skew']
+waveform_metrics_df[new_columns] = np.nan
 
-for row in final_waveforms_df.iterrows():
-    waveform= row['waveform']
+for index, row in waveform_metrics_df.iterrows():
+    waveform= row['segment_raw']
+    max_val = waveform.max()
     
-
-
-# %% ONE WAY TO DO NCA
-# NOT NEEDED
-
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-nca = NeighborhoodComponentsAnalysis(random_state=0)
-
-nca = nca.fit(X_train, y_train)
-
-knn = KNeighborsClassifier(n_neighbors=3)
-
-knn.fit(X_train, y_train)
-
-print(knn.score(X_test, y_test))
-
-
-knn.fit(nca.transform(X_train), y_train)
-
-
-print(knn.score(nca.transform(X_test), y_test))
-
-
-# %% ANOTHER WAY TO DO NCA
-# NOT NEEDED 
-n_neighbors = 3
-random_state = 0
-
-nca = make_pipeline(
-    StandardScaler(),
-    NeighborhoodComponentsAnalysis(n_components=2, random_state=random_state),
-)
-knn = KNeighborsClassifier(n_neighbors=n_neighbors)
-plt.figure()
-# plt.subplot(1, 3, i + 1, aspect=1)
-
-# Fit the method's model
-nca.fit(X_train, y_train)
-
-# Fit a nearest neighbor classifier on the embedded training set
-knn.fit(nca.transform(X_train), y_train)
-
-# Compute the nearest neighbor accuracy on the embedded test set
-acc_knn = knn.score(nca.transform(X_test), y_test)
-
-# Embed the data set in 2 dimensions using the fitted model
-X_embedded = nca.transform(X)
-
-# Plot the projected points and show the evaluation score
-plt.scatter(X_embedded[:, 0], X_embedded[:, 1], c=y, s=30, cmap="Set1")
-plt.title(
-    "{}, KNN (k={})\nTest accuracy = {:.2f}".format("NCA", n_neighbors, acc_knn)
-)
-plt.show()
-
-
-#%%
-## CODE BELOW DOESN'T WORK
-from sklearn.decomposition import PCA
-
-def plot_training_data_with_decision_boundary(
-    kernel, ax=None, long_title=True, support_vectors=True
-):
-    # Train the SVC
-    pca = PCA(n_components=2)
-    X_2d = pca.fit_transform(X)
-    #y_2d = pca.fit_transform(y)
+    waveform_metrics_df.at[index, 'area'] = np.trapz(waveform)
+    waveform_metrics_df.at[index, 'amplitude'] = max_val
     
-    clf = svm.SVC(kernel='rbf').fit(X_2d, y)
-
-
-    # Settings for plotting
-    if ax is None:
-        _, ax = plt.subplots(figsize=(4, 3))
-    x_min, x_max, y_min, y_max = -3, 3, -3, 3
-    ax.set(xlim=(x_min, x_max), ylim=(y_min, y_max))
-
-    # Plot decision boundary and margins
-    common_params = {"estimator": clf, "X": X_2d, "ax": ax}
-    DecisionBoundaryDisplay.from_estimator(
-        **common_params,
-        response_method="predict",
-        plot_method="pcolormesh",
-        alpha=0.3,
-        shading='auto',
-    )
-    DecisionBoundaryDisplay.from_estimator(
-        **common_params,
-        response_method="predict",
-        plot_method="contour",
-        levels=[-1, 0, 1],
-        colors=["k", "k", "k"],
-        linestyles=["--", "-", "--"],
-    )
-
-    if support_vectors:
-        # Plot bigger circles around samples that serve as support vectors
-        ax.scatter(
-            clf.support_vectors_[:, 0],
-            clf.support_vectors_[:, 1],
-            s=150,
-            facecolors="none",
-            edgecolors="k",
-        )
-
-    # Plot samples by color and add legend
-    scatter = ax.scatter(X_2d[:, 0], X_2d[:, 1], c=y, s=5, edgecolors="k")
-    ax.legend(*scatter.legend_elements(), loc="upper right", title="Classes")
-    if long_title:
-        ax.set_title(f" Decision boundaries of {kernel} kernel in SVC")
+    half_max = max_val / 2.0
+    above_half = waveform >= half_max
+    indices = np.where(above_half)[0]
+    if len(indices) < 2:
+        width = np.nan
     else:
-        ax.set_title(kernel)
+        width = indices[-1] - indices[0]
+    waveform_metrics_df.at[index, 'width'] = width
+    
+    mirrored_waveform = waveform[::-1]
+    sym_stat = stats.pearsonr(waveform, mirrored_waveform)
+    waveform_metrics_df.at[index, 'symmetry'] = sym_stat[0]
+    
+    waveform_metrics_df.at[index, 'skew'] = stats.skew(waveform)
 
-    if ax is None:
-        plt.show()
+    peak_index = np.argmax(waveform)
+    slopes = np.gradient(waveform)
+    
+    rising_slopes = slopes[:peak_index + 1]
+    avg_rising_slope = np.mean(rising_slopes)
+    waveform_metrics_df.at[index, 'pos_grad'] = avg_rising_slope
+        
+    falling_slopes = slopes[peak_index:]
+    avg_falling_slope = np.mean(falling_slopes)
+    waveform_metrics_df.at[index, 'neg_grad'] = avg_falling_slope
 
-plot_training_data_with_decision_boundary("rbf")
+# ==============================================================================
+# Plots of metrics + stats
+# ==============================================================================
+subset_df = waveform_metrics_df[waveform_metrics_df['cluster_num'].isin([0, 1, 2])]
 
-# %% Plotting SVM
+
+# Loop through each metric and plot a violin plot
+for metric in new_columns:
+    plt.figure(figsize=(6, 4))
+    sns.violinplot(data=subset_df, x='cluster_num', y=metric)
+    plt.title(f'{metric}')
+    plt.xlabel('Cluster Number')
+    plt.ylabel(metric)
+    plt.tight_layout()
+    plt.show()
+    
+ # Loop through each metric and plot a box plot   
+for metric in new_columns:
+    plt.figure(figsize=(6, 4))
+    sns.boxenplot(data=subset_df, x='cluster_num', y=metric)
+    plt.title(f'{metric}')
+    plt.xlabel('Cluster Number')
+    plt.ylabel(metric)
+    plt.tight_layout()
+    plt.show()
+
+# Kolmogorov-Smirnov test
+ks_results = []
+for metric in new_columns:
+    # Group values by true_label
+    print(f"\n🔍 {metric}")
+    metric_results = {'metric': metric}
+    groups = {label: subset_df[subset_df['cluster_num'] == label][metric] for label in [0, 1, 2]}
+    
+    for (label1, label2) in combinations(groups.keys(), 2):
+        stat, p = ks_2samp(groups[label1], groups[label2])
+        key = f"{label1}_vs_{label2}"
+        metric_results[f"ks_stat_{key}"] = stat
+        metric_results[f"ks_p_{key}"] = p
+
+        print(f"KS test {key}: stat = {stat:.3f}, p = {p:.3f}")
+        if p < 0.05:
+            if stat < 0.05:
+                print("→ Neglibile effect")
+            elif stat < 0.2:
+                print("→ Small effect")
+            elif stat < 0.3:
+                print("→ Medium effect")
+            else:
+                print("→ Large effect")
+        else:
+            print("not significant")
+    
+    ks_results.append(metric_results)
+    
+# Kruskal-wallis test
+results = []
+for metric in new_columns:
+    # Group values by true_label
+    groups = [subset_df[subset_df['cluster_num'] == label][metric] for label in [0, 1, 2]]
+    
+    # Kruskal-Wallis test
+    H, p = stats.kruskal(*groups)
+    n = len(subset_df)
+    k = len(groups)
+    epsilon_squared = (H - k + 1) / (n - k)
+    results.append({'metric': metric, 
+                    'kruskal_H': H,
+                    'kruskal_p': p,
+                    'epsilon_squared': epsilon_squared
+                    })
+
+    print(f"\n🔍 {metric}")
+    print(f"Kruskal-Wallis p-value: {p:.4f}")
+    #print(f"Epsilon-squared (effect size): {epsilon_squared:.4f}")
+    
+    if epsilon_squared < 0.01:
+        print("negligible effect size")
+    elif epsilon_squared < 0.04:
+        print("Weak effect size")
+    elif epsilon_squared < 0.16:
+        print("moderate effect")
+    # If significant, do post-hoc Dunn test
+    if p < 0.05:
+        print("→ Running post-hoc Dunn's test:")
+        posthoc = sp.posthoc_dunn(subset_df, val_col=metric, group_col='cluster_num')
+        #print(posthoc)
+        significant_pairs = posthoc[posthoc < 0.05]
+        print(significant_pairs)
+    else:
+        print("not significant")
+
+for r in results:
+    metric = r['metric']
+    H = r['epsilon_squared']
+    print(f'{metric}: {H:.3f}')
+
 
 
 
