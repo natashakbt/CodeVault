@@ -34,7 +34,7 @@ import pandas as pd
 import math
 from sklearn.metrics import cohen_kappa_score
 from scipy.stats import pearsonr
-
+import numpy as np
 
 '''# =========INPUT BASE FOLER, RAT NAME and TEST DAY NUM HERE============'''
 base_folder = '/media/natasha/drive2/Natasha_Data' # contains folders of all rats' data
@@ -68,6 +68,7 @@ def add_lists(list1, list2):
         result.append(elem1 + elem2)
     # Return a new list with the results
     return result
+
 
 # =============================================================================
 # Import and process csv files exported from BORIS containing scored behavior data.
@@ -116,7 +117,9 @@ for csv_path in csv_paths:
         columns_to_drop = [col for col in table.columns if col not in columns_to_keep]
         table.drop(columns=columns_to_drop, inplace=True) # Remove unwanted columns
     for csv, table in zip(csv_path, scoring_data):
-        scoring_dict[csv] = table  # Convert DataFrame to list of lists
+        filename_last = os.path.basename(csv)
+        last_part = os.path.splitext(filename_last)[0]
+        scoring_dict[last_part] = table  # Convert DataFrame to list of lists
 
  
 keys_list = list(scoring_dict.keys())
@@ -152,7 +155,7 @@ for i in range(0, len(scoring_dict), 2):
     common_trial = [int(element) for element in common_trial] # Converting to integers
     common_trials.append(common_trial)
 
-
+# %% Presence/absence cohen's kappa
 # =============================================================================
 # INTER-RATER RELIABILITY ANALYSES
 # =============================================================================
@@ -228,7 +231,7 @@ for behavior in behaviors_i_care_about:
     print(behavior, 'cohens kappa: ', round(k,3))
     
  
-
+# %% Cohen's kappa behavior sequence/timing
 # === Cohen's Kappa of behavior sequence and timing ===
 #TODO: See if I can evaluate whether a behavior is aligned to mid-point with more wiggle room?
 
@@ -368,4 +371,264 @@ for behavior in behaviors_i_care_about:
     percent_overlap = my_list.count(2)/(my_list.count(1) + my_list.count(2))
     print("fraction of overlap for", behavior, "is: ", round(percent_overlap, 4))
         
+# %% New inter-rater reliability
+# =============================================================================
+# INTER-RATER RELIABILITY ANALYSES (NEW!)
+# =============================================================================
 
+# TODO: CHECK THAT CLEAN DATAFRAME ACTUALLY WORKS
+fps = 60
+trial_length = 5
+'''
+def clean_dataframe(index, df):
+    new_rows = []
+    good_trials = common_trials[index]
+    for idx, row in df.iterrows():
+        #print(row)
+        if row['Behavior'] == 'trial start':
+            trial_num = int(row['Modifier #1'])
+            trial_end = int(row['Time']) + trial_length
+        else:
+            if row['Behavior'] in behaviors_i_care_about and trial_num in good_trials and row['Time'] < trial_end:              
+                filtered_row = row[['Behavior', 'Behavior type', 'Time']]
+                filtered_row['Trial'] = trial_num
+                new_rows.append(filtered_row)
+
+    new_df = pd.DataFrame(new_rows)
+    new_df = new_df.reset_index()
+    validate_dataframe(new_df) # Check that dataframe alternates START/STOP behavior row pairs
+    return new_df
+'''
+ 
+def clean_dataframe(index, df):
+    new_rows = []
+    good_trials = common_trials[index]
+    trial_num = None
+    trial_end = None
+    i = 0
+
+    while i < len(df) - 1:
+        row = df.iloc[i]
+        
+        if row['Behavior'] == 'trial start':
+            trial_num = int(row['Modifier #1'])
+            trial_end = int(row['Time']) + trial_length
+            i += 1
+            continue
+
+        # Make sure we are working with a START/STOP pair
+        if (row['Behavior'] in behaviors_i_care_about and 
+            row['Behavior type'] == 'START' and
+            i + 1 < len(df)):
+
+            next_row = df.iloc[i + 1]
+
+            # Confirm this is a proper pair
+            if (next_row['Behavior'] == row['Behavior'] and 
+                next_row['Behavior type'] == 'STOP'):
+
+                # Check if both START and STOP fall within the trial
+                if (trial_num in good_trials and 
+                    int(row['Time']) < trial_end and 
+                    int(next_row['Time']) < trial_end):
+
+                    # Append both START and STOP rows
+                    for this_row in (row, next_row):
+                        filtered_row = this_row[['Behavior', 'Behavior type', 'Time']].copy()
+                        filtered_row['Trial'] = trial_num
+                        new_rows.append(filtered_row)
+                
+                i += 2  # Skip to the next pair
+            else:
+                i += 1  # Skip this unpaired START
+        else:
+            i += 1  # Not a START or behavior we care about
+
+    new_df = pd.DataFrame(new_rows)
+    new_df = new_df.reset_index(drop=True)
+    validate_dataframe(new_df)
+    return new_df
+
+
+rows = []
+
+for key in keys_list:
+    prefix, suffix = key.rsplit("_", 1)
+    index = math.floor(keys_list.index(key)/2)
+    
+    new_df = clean_dataframe(index, scoring_dict[key])
+    
+    rows.append({
+        'test_day': prefix,
+        'scorer': suffix,
+        'dataframe': new_df
+    })
+
+eval_scoring_df = pd.DataFrame(rows)
+
+unique_days = eval_scoring_df['test_day'].unique()
+
+to_compare = []
+for days in unique_days:
+    matching_rows = eval_scoring_df[eval_scoring_df['test_day'] == days]
+    if len(matching_rows) != 2:
+        print("something is wrong...") 
+
+    for behavior in behaviors_i_care_about:
+        for df in matching_rows.iterrows():
+            scorer = df[1]['scorer']
+            behavior_df = df[1]['dataframe']
+            behavior_df = behavior_df[behavior_df['Behavior'] == behavior]
+            if behavior_df.empty:
+                continue  # Skip if none of specific behaviors were labelled in a given test session
+            end_time = behavior_df['Time'].max()  # Last time point in seconds
+            num_frames = int(np.ceil(end_time * fps))  # total number of frames
+            
+            # Initialize binary time series
+            movement_array = np.zeros(num_frames, dtype=int)
+            
+            # 3. Iterate through START-STOP pairs and set 1s
+            
+            starts = behavior_df[behavior_df['Behavior type'] == 'START']['Time'].values
+            stops = behavior_df[behavior_df['Behavior type'] == 'STOP']['Time'].values
+            
+            # Sanity check
+            assert len(starts) == len(stops), "Unmatched START/STOP pairs"
+            
+            # Change binary time series to 1s if behavior is occuring
+            for start, stop in zip(starts, stops):
+                start_idx = int(np.floor(start * fps))
+                stop_idx = int(np.ceil(stop * fps))
+                movement_array[start_idx:stop_idx] = 1
+            print(len(movement_array))
+            to_compare.append({
+                'days': days,
+                'scorer': scorer,
+                'behavior': behavior,
+                'movement_array': movement_array
+                })
+
+to_compare_df = pd.DataFrame(to_compare)
+
+
+        
+        
+        
+        
+def get_bouts(array):
+    bouts = []
+    in_bout = False
+    start = None
+    for i, val in enumerate(array):
+        if val == 1 and not in_bout:
+            start = i
+            in_bout = True
+        elif val == 0 and in_bout:
+            bouts.append((start, i))  # [start, end)
+            in_bout = False
+    if in_bout:
+        bouts.append((start, len(array)))
+    return bouts
+
+def bouts_overlap(b1, b2):
+    # Return True if b1 and b2 overlap
+    return not (b1[1] <= b2[0] or b1[0] >= b2[1])
+
+'''
+def align_bouts(bouts0, bouts1):
+    matched0 = []
+    matched1 = []
+    used_1 = set()
+
+    for i, b0 in enumerate(bouts0):
+        # Try to match with the first available overlapping bout from scorer1
+        found_match = False
+        for j, b1 in enumerate(bouts1):
+            if j not in used_1 and bouts_overlap(b0, b1):
+                matched0.append('y')
+                matched1.append('y')
+                used_1.add(j)
+                found_match = True
+                break
+        if not found_match:
+            matched0.append('y')  # still counted as scored by scorer0
+            matched1.append('n')  # but scorer1 didn't mark it
+
+    # Add unmatched bouts from scorer1
+    for j, b1 in enumerate(bouts1):
+        if j not in used_1:
+            matched0.append('n')
+            matched1.append('y')
+
+    return matched0, matched1
+'''
+def align_bouts(bouts0, bouts1):
+    matched0 = []
+    matched1 = []
+    for i, b0 in enumerate(bouts0):
+        # Try to match with the first available overlapping bout from scorer1
+        found_match = False
+        for j, b1 in enumerate(bouts1):
+            if bouts_overlap(b0, b1):
+                found_match = True
+                matched0.append('y')
+                matched1.append('y')
+                break
+        if not found_match:
+            matched0.append('y')
+            matched1.append('n')
+
+    return matched0, matched1
+
+
+results = {}
+grouped = to_compare_df.groupby(['days', 'behavior'])
+
+# Iterate through each group and extract movement arrays
+for (day, behavior), group in grouped:
+    arrays = group['movement_array'].tolist()  # list of arrays (one per scorer)
+    if len(arrays) < 2:
+        continue
+    
+    a0 = np.array(arrays[0])
+    a1 = np.array(arrays[1])
+    
+    # Elementwise comparison
+    comparison = a0 != a1
+    print("Any difference?", np.any(comparison))
+    print("All different?", np.all(comparison))
+    print("-------------------")
+    
+    scorers = group['scorer'].tolist()
+    min_len = min(arr.shape[0] for arr in arrays)
+
+    trimmed_arrays = [arr[:min_len] for arr in arrays] # Trim arrays to match the shortest
+    
+    a0, a1 = trimmed_arrays
+    bouts0 = get_bouts(a0)
+    bouts1 = get_bouts(a1)
+    
+    results0, results1 = align_bouts(bouts1, bouts0)
+    
+    if behavior not in results:
+        results[behavior] = {}
+    for scorer, result in zip(scorers, [results0, results1]):
+        if scorer not in results[behavior]:
+            results[behavior][scorer] = []
+    # Assign using real scorer names
+    results[behavior][scorers[0]].extend(results0)
+    results[behavior][scorers[1]].extend(results1)
+
+cohen_kappa_score(results0, results1) 
+
+from itertools import chain
+for behavior in behaviors_i_care_about: 
+    y1_presence_nested = results[behavior][scorer_initials[0]]
+    y2_presence_nested = results[behavior][scorer_initials[1]]
+    
+    # Flatten nested lists
+    #y1_presence = list(chain.from_iterable(y1_presence_nested))
+    #y2_presence = list(chain.from_iterable(y2_presence_nested))
+
+    k = cohen_kappa_score(y1_presence_nested, y2_presence_nested) 
+    print(behavior, 'cohens kappa: ', round(k,3))
