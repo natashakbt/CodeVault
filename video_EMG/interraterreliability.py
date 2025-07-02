@@ -33,8 +33,11 @@ import os
 import pandas as pd
 import math
 from sklearn.metrics import cohen_kappa_score
+from sklearn.metrics import accuracy_score
 from scipy.stats import pearsonr
 import numpy as np
+import matplotlib.pyplot as plt
+import random
 
 '''# =========INPUT BASE FOLER, RAT NAME and TEST DAY NUM HERE============'''
 base_folder = '/media/natasha/drive2/Natasha_Data' # contains folders of all rats' data
@@ -232,6 +235,7 @@ for behavior in behaviors_i_care_about:
     
  
 # %% Cohen's kappa behavior sequence/timing
+# === I THINK THE CODE BELOW DOESN'T WORK - DON'T USE IT ===
 # === Cohen's Kappa of behavior sequence and timing ===
 #TODO: See if I can evaluate whether a behavior is aligned to mid-point with more wiggle room?
 
@@ -373,33 +377,16 @@ for behavior in behaviors_i_care_about:
         
 # %% New inter-rater reliability
 # =============================================================================
-# INTER-RATER RELIABILITY ANALYSES (NEW!)
+# INTER-RATER RELIABILITY ANALYSES (USE THIS ONE!)
 # =============================================================================
 
-# TODO: CHECK THAT CLEAN DATAFRAME ACTUALLY WORKS
-fps = 60
-trial_length = 5
-'''
-def clean_dataframe(index, df):
-    new_rows = []
-    good_trials = common_trials[index]
-    for idx, row in df.iterrows():
-        #print(row)
-        if row['Behavior'] == 'trial start':
-            trial_num = int(row['Modifier #1'])
-            trial_end = int(row['Time']) + trial_length
-        else:
-            if row['Behavior'] in behaviors_i_care_about and trial_num in good_trials and row['Time'] < trial_end:              
-                filtered_row = row[['Behavior', 'Behavior type', 'Time']]
-                filtered_row['Trial'] = trial_num
-                new_rows.append(filtered_row)
+fps = 60 
+trial_length = 5 # in seconds, how long to evaluate the interrater reliability
 
-    new_df = pd.DataFrame(new_rows)
-    new_df = new_df.reset_index()
-    validate_dataframe(new_df) # Check that dataframe alternates START/STOP behavior row pairs
-    return new_df
-'''
- 
+# =============================================================================
+# DEFINE IMPORTANT FUNCTIONS
+# =============================================================================
+
 def clean_dataframe(index, df):
     new_rows = []
     good_trials = common_trials[index]
@@ -448,7 +435,51 @@ def clean_dataframe(index, df):
     new_df = new_df.reset_index(drop=True)
     validate_dataframe(new_df)
     return new_df
+      
+def get_bouts(array):
+    bouts = []
+    in_bout = False
+    start = None
+    for i, val in enumerate(array):
+        if val == 1 and not in_bout:
+            start = i
+            in_bout = True
+        elif val == 0 and in_bout:
+            bouts.append((start, i))  # [start, end)
+            in_bout = False
+    if in_bout:
+        bouts.append((start, len(array)))
+    return bouts
 
+def bouts_overlap(b1, b2):
+    # Return True if b1 and b2 overlap
+    return not (b1[1] <= b2[0] or b1[0] >= b2[1])
+
+
+def align_bouts(bouts0, bouts1):
+    matched0 = []
+    matched1 = []
+    for i, b0 in enumerate(bouts0):
+        # Try to match with the first available overlapping bout from scorer1
+        found_match = False
+        for j, b1 in enumerate(bouts1):
+            if bouts_overlap(b0, b1):
+                found_match = True
+                matched0.append('y')
+                matched1.append('y')
+                break
+        if not found_match:
+            matched0.append('y')
+            matched1.append('n')
+
+    return matched0, matched1
+
+# =============================================================================
+# BUILDING DATAFRAME NEEDED FOR COMPARISON
+# dataframe to be built is to_compare_df
+# For every day/scorer/behavior - there is an array that is trial_length in sec * fps long
+# This array is 0s and 1s for when the behavior occured per frame, concatinating for every trial
+# =============================================================================
 
 rows = []
 
@@ -500,7 +531,7 @@ for days in unique_days:
                 start_idx = int(np.floor(start * fps))
                 stop_idx = int(np.ceil(stop * fps))
                 movement_array[start_idx:stop_idx] = 1
-            print(len(movement_array))
+            print(len(movement_array), scorer, days, behavior)
             to_compare.append({
                 'days': days,
                 'scorer': scorer,
@@ -508,80 +539,15 @@ for days in unique_days:
                 'movement_array': movement_array
                 })
 
-to_compare_df = pd.DataFrame(to_compare)
+to_compare_df = pd.DataFrame(to_compare) 
 
+# =============================================================================
+# COMPARE ARRAYS TO EACH OTHER WITH ACCURACY SCORES
+# A IS ONE WAY, B IS THE OTHER WAY
+# =============================================================================
 
-        
-        
-        
-        
-def get_bouts(array):
-    bouts = []
-    in_bout = False
-    start = None
-    for i, val in enumerate(array):
-        if val == 1 and not in_bout:
-            start = i
-            in_bout = True
-        elif val == 0 and in_bout:
-            bouts.append((start, i))  # [start, end)
-            in_bout = False
-    if in_bout:
-        bouts.append((start, len(array)))
-    return bouts
-
-def bouts_overlap(b1, b2):
-    # Return True if b1 and b2 overlap
-    return not (b1[1] <= b2[0] or b1[0] >= b2[1])
-
-'''
-def align_bouts(bouts0, bouts1):
-    matched0 = []
-    matched1 = []
-    used_1 = set()
-
-    for i, b0 in enumerate(bouts0):
-        # Try to match with the first available overlapping bout from scorer1
-        found_match = False
-        for j, b1 in enumerate(bouts1):
-            if j not in used_1 and bouts_overlap(b0, b1):
-                matched0.append('y')
-                matched1.append('y')
-                used_1.add(j)
-                found_match = True
-                break
-        if not found_match:
-            matched0.append('y')  # still counted as scored by scorer0
-            matched1.append('n')  # but scorer1 didn't mark it
-
-    # Add unmatched bouts from scorer1
-    for j, b1 in enumerate(bouts1):
-        if j not in used_1:
-            matched0.append('n')
-            matched1.append('y')
-
-    return matched0, matched1
-'''
-def align_bouts(bouts0, bouts1):
-    matched0 = []
-    matched1 = []
-    for i, b0 in enumerate(bouts0):
-        # Try to match with the first available overlapping bout from scorer1
-        found_match = False
-        for j, b1 in enumerate(bouts1):
-            if bouts_overlap(b0, b1):
-                found_match = True
-                matched0.append('y')
-                matched1.append('y')
-                break
-        if not found_match:
-            matched0.append('y')
-            matched1.append('n')
-
-    return matched0, matched1
-
-
-results = {}
+results_a = {}
+results_b = {}
 grouped = to_compare_df.groupby(['days', 'behavior'])
 
 # Iterate through each group and extract movement arrays
@@ -590,45 +556,271 @@ for (day, behavior), group in grouped:
     if len(arrays) < 2:
         continue
     
-    a0 = np.array(arrays[0])
-    a1 = np.array(arrays[1])
-    
-    # Elementwise comparison
-    comparison = a0 != a1
-    print("Any difference?", np.any(comparison))
-    print("All different?", np.all(comparison))
-    print("-------------------")
-    
     scorers = group['scorer'].tolist()
     min_len = min(arr.shape[0] for arr in arrays)
 
     trimmed_arrays = [arr[:min_len] for arr in arrays] # Trim arrays to match the shortest
     
-    a0, a1 = trimmed_arrays
+    # Map scorer to trimmed array
+    scorer_to_array = dict(zip(scorers, trimmed_arrays))
+    
+    # Ensure consistement assign of a0 to 'YW' and a1 to 'NBT'
+    a0 = scorer_to_array['YW']
+    a1 = scorer_to_array['NBT']
+    
+        
+    # Elementwise comparison
+    comparison = a0 != a1
+    if np.any(comparison) == False:
+        print(f"No difference between scorers' arrays? {day} {behavior}")
+    
+    
     bouts0 = get_bouts(a0)
     bouts1 = get_bouts(a1)
     
-    results0, results1 = align_bouts(bouts1, bouts0)
+    results0, results1 = align_bouts(bouts0, bouts1)
+    results2, results3 = align_bouts(bouts1, bouts0)
     
-    if behavior not in results:
-        results[behavior] = {}
-    for scorer, result in zip(scorers, [results0, results1]):
-        if scorer not in results[behavior]:
-            results[behavior][scorer] = []
+    if behavior not in results_a:
+        results_a[behavior] = {scorers[0]: [], scorers[1]: []}
+    if behavior not in results_b:
+        results_b[behavior] = {scorers[0]: [], scorers[1]: []}
     # Assign using real scorer names
-    results[behavior][scorers[0]].extend(results0)
-    results[behavior][scorers[1]].extend(results1)
-
-cohen_kappa_score(results0, results1) 
-
-from itertools import chain
-for behavior in behaviors_i_care_about: 
-    y1_presence_nested = results[behavior][scorer_initials[0]]
-    y2_presence_nested = results[behavior][scorer_initials[1]]
+    results_a[behavior][scorers[0]].extend(results0)
+    results_a[behavior][scorers[1]].extend(results1)    
     
-    # Flatten nested lists
-    #y1_presence = list(chain.from_iterable(y1_presence_nested))
-    #y2_presence = list(chain.from_iterable(y2_presence_nested))
+    # Assign using real scorer names
+    results_b[behavior][scorers[0]].extend(results2)
+    results_b[behavior][scorers[1]].extend(results3)
 
-    k = cohen_kappa_score(y1_presence_nested, y2_presence_nested) 
-    print(behavior, 'cohens kappa: ', round(k,3))
+
+results_bar_chart_a = []
+results_bar_chart_b = []
+for behavior in behaviors_i_care_about: 
+    y0_presence_nested = results_a[behavior][scorer_initials[0]]
+    y1_presence_nested = results_a[behavior][scorer_initials[1]]
+    
+    y2_presence_nested = results_b[behavior][scorer_initials[0]]
+    y3_presence_nested = results_b[behavior][scorer_initials[1]]
+    
+    
+    ka = accuracy_score(y0_presence_nested, y1_presence_nested) 
+    kb = accuracy_score(y2_presence_nested, y3_presence_nested) 
+    results_bar_chart_a.append(ka)
+    results_bar_chart_b.append(kb)
+
+# =============================================================================
+# CREATE SHUFFLED DATA
+# =============================================================================
+
+# %%
+iterations = 100 # how many times to shuffle
+sh_results_bar_chart_a = []
+sh_results_bar_chart_b = []
+for i in range(iterations):
+    sh_to_compare = []
+    for days in unique_days:
+        matching_rows = eval_scoring_df[eval_scoring_df['test_day'] == days]
+        if len(matching_rows) != 2:
+            print("something is wrong...") 
+    
+        for behavior in behaviors_i_care_about:
+            for df in matching_rows.iterrows():
+                scorer = df[1]['scorer']
+                behavior_df_to_shuffle = df[1]['dataframe']
+                
+                for i in range(0, len(behavior_df_to_shuffle), 2):
+                    rand_behavior = random.choice(behaviors_i_care_about)
+                    
+                    behavior_df_to_shuffle.at[i, 'Behavior'] = rand_behavior
+                    behavior_df_to_shuffle.at[i + 1, 'Behavior'] = rand_behavior
+                
+                behavior_df = behavior_df_to_shuffle[behavior_df_to_shuffle['Behavior'] == behavior]
+                if behavior_df.empty:
+                    continue  # Skip if none of specific behaviors were labelled in a given test session
+                end_time = behavior_df['Time'].max()  # Last time point in seconds
+                num_frames = int(np.ceil(end_time * fps))  # total number of frames
+                
+                # Initialize binary time series
+                movement_array = np.zeros(num_frames, dtype=int)
+                
+                # 3. Iterate through START-STOP pairs and set 1s
+                starts = behavior_df_to_shuffle[behavior_df_to_shuffle['Behavior type'] == 'START']['Time'].values
+                stops = behavior_df_to_shuffle[behavior_df_to_shuffle['Behavior type'] == 'STOP']['Time'].values
+                
+                # Sanity check
+                assert len(starts) == len(stops), "Unmatched START/STOP pairs"
+                
+                # Change binary time series to 1s if behavior is occuring
+                for start, stop in zip(starts, stops):
+                    start_idx = int(np.floor(start * fps))
+                    stop_idx = int(np.ceil(stop * fps))
+                    movement_array[start_idx:stop_idx] = 1
+                #print(len(movement_array), scorer, days, behavior)
+                sh_to_compare.append({
+                    'days': days,
+                    'scorer': scorer,
+                    'behavior': behavior,
+                    'movement_array': movement_array
+                    })
+    
+    sh_to_compare_df = pd.DataFrame(sh_to_compare)
+    
+    shuffle_df_a = pd.concat([
+        to_compare_df[to_compare_df['scorer'] == 'YW'],
+        sh_to_compare_df[sh_to_compare_df['scorer'] == 'NBT']
+    ], ignore_index=True)
+    
+    # For shuffle_df_b: keep original 'NBT' + shuffled 'YW'
+    shuffle_df_b = pd.concat([
+        to_compare_df[to_compare_df['scorer'] == 'NBT'],
+        sh_to_compare_df[sh_to_compare_df['scorer'] == 'YW']
+    ], ignore_index=True)
+    
+    sh_results_a = {}
+    sh_results_b = {}
+
+    for i in range(2):
+        if i == 0:
+            sh_grouped = shuffle_df_a.groupby(['days', 'behavior'])
+        elif i == 1:
+            sh_grouped = shuffle_df_b.groupby(['days', 'behavior'])
+                
+        # Iterate through each group and extract movement arrays
+        for (day, behavior), group in sh_grouped:
+            arrays = group['movement_array'].tolist()  # list of arrays (one per scorer)
+            if len(arrays) < 2:
+                continue
+            
+            scorers = group['scorer'].tolist()
+            min_len = min(arr.shape[0] for arr in arrays)
+    
+            trimmed_arrays = [arr[:min_len] for arr in arrays] # Trim arrays to match the shortest
+            
+            # Map scorer to trimmed array
+            scorer_to_array = dict(zip(scorers, trimmed_arrays))
+            
+            if i == 0:
+                # Ensure consistement assign of a0 to 'NBT' and a1 to 'YW'
+                a0 = scorer_to_array['NBT']
+                a1 = scorer_to_array['YW']
+            elif i == 1:
+                # Ensure consistement assign of a0 to 'YW' and a1 to 'NBT'
+                a0 = scorer_to_array['YW']
+                a1 = scorer_to_array['NBT']
+            
+            # Compare frame-by-frame 0/1s arrays to double check
+            # that there is no weird error 
+            comparison = a0 != a1
+            if np.any(comparison) == False:
+                print(f"No difference between scorers' arrays? {day} {behavior}")
+            
+            bouts0 = get_bouts(a0)
+            bouts1 = get_bouts(a1)
+            
+            results0, results1 = align_bouts(bouts0, bouts1)
+
+            if i == 0:
+                if behavior not in sh_results_a:
+                    sh_results_a[behavior] = {scorers[0]: [], scorers[1]: []}
+                # Assign using real scorer names
+                sh_results_a[behavior][scorers[0]].extend(results0)
+                sh_results_a[behavior][scorers[1]].extend(results1)    
+                        
+                    
+            elif i == 1:        
+                if behavior not in sh_results_b:
+                    sh_results_b[behavior] = {scorers[0]: [], scorers[1]: []}
+
+                # Assign using real scorer names
+                sh_results_b[behavior][scorers[0]].extend(results0)
+                sh_results_b[behavior][scorers[1]].extend(results1)
+
+    for behavior in behaviors_i_care_about: 
+        y0_presence_nested = sh_results_a[behavior][scorer_initials[0]]
+        y1_presence_nested = sh_results_a[behavior][scorer_initials[1]]
+        
+        y2_presence_nested = sh_results_b[behavior][scorer_initials[0]]
+        y3_presence_nested = sh_results_b[behavior][scorer_initials[1]]
+        
+        ka = accuracy_score(y0_presence_nested, y1_presence_nested) 
+        kb = accuracy_score(y2_presence_nested, y3_presence_nested) 
+        
+        sh_results_bar_chart_a.append((behavior, ka))
+        sh_results_bar_chart_b.append((behavior, kb))
+
+sh_results_bar_chart_a_df = pd.DataFrame(sh_results_bar_chart_a, columns=['behavior', 'result'])
+sh_results_bar_chart_b_df = pd.DataFrame(sh_results_bar_chart_b, columns=['behavior', 'result'])
+
+final_shuffle_results_bar_df = pd.concat(
+    [sh_results_bar_chart_a_df, sh_results_bar_chart_b_df],
+    ignore_index=True
+)
+
+shuffle_means = final_shuffle_results_bar_df.groupby('behavior').mean()
+print(shuffle_means)
+
+shuffle_errors = (
+    final_shuffle_results_bar_df
+    .groupby('behavior')['result']
+    .std()
+    .reindex(['mouth or tongue movement', 'gape', 'lateral tongue movement'])
+    .to_numpy()
+)
+
+
+shuffle_means = (
+    final_shuffle_results_bar_df
+    .groupby('behavior')['result']
+    .mean()
+    .reindex(['mouth or tongue movement', 'gape', 'lateral tongue movement'])
+    .to_numpy()
+)
+
+# %%
+# =============================================================================
+# PLOT FIGURE
+# =============================================================================
+
+averages = [(a + b) / 2 for a, b in zip(results_bar_chart_a, results_bar_chart_b)]
+
+# Set up figure
+#x = np.arange(len(behaviors_i_care_about))
+x = np.array([0, 0.6, 1.2])
+width = 0.4  # width of the bar
+
+fig, ax = plt.subplots()
+
+# Plot average bars
+bars = ax.bar(x, averages, width=width, color='0.8',
+              linewidth=2,
+              edgecolor='k')
+
+'''
+plt.errorbar(x, shuffle_means, shuffle_errors, 
+             linestyle='None', marker='^', markersize=0,
+             ecolor='black',      # error bar color
+             elinewidth=2)
+'''
+for xpos, yval in zip(x, shuffle_means):
+    ax.hlines(y=yval, xmin=xpos - width/2, xmax=xpos + width/2,
+              colors='red', linestyles='dashed', linewidth=2)
+
+# Plot dots for individual results
+ax.scatter(x - width/4, results_bar_chart_a, 
+           color='k', zorder=5, s=120,
+           marker = '+')
+ax.scatter(x + width/4, results_bar_chart_b, 
+           color='k', zorder=5, s=120,
+           marker = 'x')
+
+# Labels and formatting
+ax.set_xticks(x)
+ax.set_xlim(-0.3, 1.5)
+ax.set_ylim(0, 1)
+ax.set_xticklabels(['MTM', 'Gape', 'LTM'])
+ax.set_ylabel('Accuracy Score')
+
+plt.tight_layout()
+plt.show()
+

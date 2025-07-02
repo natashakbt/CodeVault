@@ -181,6 +181,8 @@ if fixed_cluster_num == 3:
 #elif fixed_cluster_num == 4:
 else:
     custom_colors = ['#4285F4', '#88498F', '#08605F', '#0CBABA',  '#B0B0B0']
+    custom_colors = ['#4285F4', '#88498F', '#0CBABA']
+
     cmap = ListedColormap(custom_colors)
 #else:
 #    cmap = 'inferno'
@@ -349,20 +351,54 @@ histogram_path = os.path.join(pca_dir, 'optimal_clusters_histogram.png')
 plt.savefig(histogram_path)
 plt.show()
     
-rounded_numbers = [round(num) for num in optimal_cluster_list]
-#plt.hist(optimal_cluster_list, bins=len(n_components_range), 
-plt.hist(rounded_numbers,bins = 3,
-         color='cornflowerblue', 
-         edgecolor='black')
+import seaborn as sns
+# Create KDE plot
+plt.figure(figsize=(8, 5))
+sns.kdeplot(optimal_cluster_list, 
+            fill=True, 
+            color='black', 
+            bw_adjust=0.5,  # adjust for smoothness
+            clip=(1, 14),
+            linewidth=2.5)   # restrict KDE to 1-14
+
+# Add vertical line at the mode
 plt.axvline(x=mode_result[0], 
             color='red', 
             linestyle='--', 
             linewidth=2)
+
+# Set axis limits and labels
+plt.xlim(1, 14)
+plt.xlabel('Optimal Number of Clusters')
+plt.ylabel('Density')
+plt.title(f'Distribution of Optimal Cluster Number ({iterations} iterations)')
+
+# Save the figure
+histogram_path = os.path.join(pca_dir, 'optimal_clusters_kde.png')
+plt.savefig(histogram_path)
+plt.show()
+plt.clf()
+
+#####################
+#### THIS ONE IS NICE!!!! #########
+rounded_numbers = [round(num) for num in optimal_cluster_list]
+#plt.hist(optimal_cluster_list, bins=len(n_components_range), 
+plt.hist(rounded_numbers,
+         bins = np.arange(0, 16),
+         color='0.8', 
+         edgecolor='black',
+         linewidth=2)
+plt.axvline(x=mode_result[0]+0.5, 
+            color='red', 
+            linestyle='--', 
+            linewidth=3.5)
 plt.xlabel('Optimal Number of Clusters')
 plt.ylabel('Frequency')
 plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
-#  histogram_path = os.path.join(pca_dir, 'optimal_clusters_histogram.png')
-#plt.savefig(histogram_path)
+plt.xlim(0.5, 14.5)
+
+# Center ticks on each bar with correct labels
+plt.xticks(ticks=np.arange(0.5, 15.0, 1), labels=np.arange(0, 15))
 plt.show()
     
 
