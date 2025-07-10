@@ -10,16 +10,12 @@ Save a backup of your raw data first.
 
 """
 
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
-from sklearn.mixture import GaussianMixture
 import os
 import umap
 import glob
-import diptest
-from scipy import stats, signal
+from scipy import signal
 from scipy.signal import find_peaks
 
 # ==============================================================================
@@ -29,14 +25,13 @@ dirname = '/home/natasha/Desktop/clustering_data/'
 #file_path = os.path.join(dirname, 'mtm_clustering_df.pkl')
 file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl')
 df = pd.read_pickle(file_path)
-df = df.rename(columns={'pred_event_type': 'event_type'})
+
 
 unique_basenames = df['basename'].unique()
-basename_to_num = {name: idx for idx, name in enumerate(unique_basenames)}
-df['session_ind'] = df['basename'].map(basename_to_num)
+'''
 df.rename_axis("obsolete_idx", inplace=True) # Default Index does not increment by 1. Renaming it.
 df.reset_index(inplace=True) # Make new Index that increments by 1 per row
-
+'''
 # Make a dataframe of just mouth or tongue movement events
 #mtm_bool = df.event_type.str.contains('mouth or tongue movement')
 mtm_bool = df.event_type.str.contains('MTMs')
@@ -44,7 +39,7 @@ mtm_df_all = df.loc[mtm_bool]
 
 
 # ==============================================================================
-# Test which waveforms are bimodal (using non-normalized waveforms)
+# %% Test which waveforms are bimodal (using non-normalized waveforms)
 # Compute the cross-correlation of each wavweform with itself
 # Examine the cross-correlation function (at only positive lag values) for peaks
 # -> Multi-modal waveforms have 1 or more peaks 
@@ -83,15 +78,17 @@ for index, row in mtm_df_all.iterrows():
         ax_corr.plot(pos_corr)
     ax_corr.plot(corr_peaks, pos_corr[corr_peaks], "x", markersize=20)
     '''
-    
-# Overwrite data without multimodal segments
+
+# ==============================================================================
+# %% Overerwrite data file with new dataframe without multimodal segments
+# ==============================================================================
 df_filter_multimodal = df[df['multimodal'] != 'yes'] # Remove multimodal from df
 #df_filter_multimodal = df # Un-comment this line to KEEP multimodal waveforms in the dataframe.
 df_filter_multimodal.to_pickle(file_path) # Overwrite and save dataset
 
 
 # ==============================================================================
-# Plots for visualizing uni/multi-modal waveforms
+# %% Plots for visualizing uni/multi-modal waveforms
 # ==============================================================================
 # Create folder for saving plots
 multimodal_dir = os.path.join(dirname, 'multimodal_analysis')
@@ -101,8 +98,9 @@ all_files = glob.glob(os.path.join(multimodal_dir, '*'))
 for file in all_files:
     os.remove(file)
     
-
-## Plot all uni/multimodal segments overlapped
+# ==============================================================================
+# Plot all uni/multimodal segments overlapped
+# ==============================================================================
 ## NB: Using normalized segments just for plotting
 fig, (ax_uni, ax_multi) = plt.subplots(2, 1, figsize=(8, 8))
 
@@ -128,7 +126,10 @@ plt.savefig(overlap_plt_path)
 plt.show()
 
 
-# See if multimodal waveforms cluster with UMAP reduction
+# ==============================================================================
+# Plot waveforms in UMAP space to see if multi/unimodal waveforms cluster
+# ==============================================================================
+# Initialize UMAP reduction
 reducer = umap.UMAP()
 new_mtm_bool = df.event_type.str.contains('MTMs')
 new_mtm_df_all = df.loc[new_mtm_bool]
@@ -136,7 +137,7 @@ waveforms = new_mtm_df_all['segment_norm_interp'].tolist()
 #scaled_waveforms = StandardScaler().fit_transform(waveforms)
 embedding = reducer.fit_transform(waveforms) # UMAP embedding
 
-# Create the UMAP scatter plot
+# Plot UMAP
 color_map = {'yes': 'lightcoral', 'no': 'cornflowerblue'}
 colors = new_mtm_df_all['multimodal'].map(color_map)
 plt.figure(figsize=(10, 8))

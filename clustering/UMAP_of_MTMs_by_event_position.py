@@ -28,10 +28,14 @@ from tqdm import tqdm
 from scipy.ndimage import gaussian_filter
 from matplotlib.colors import TwoSlopeNorm
 
-
+dirname = '/home/natasha/Desktop/clustering_data/'
+file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
+df = pd.read_pickle(file_path)
+transition_df = pd.read_pickle(file_path)
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
+'''
 dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
@@ -41,20 +45,30 @@ transition_df = pd.read_pickle(transition_file_path)
 
 # Remove any data for df that does not have an associated transition time in scaled_mode_tau
 df['basename'] = df['basename'].str.lower() # All basenames to lowercase
+df = df.rename(columns={'taste': 'taste_num'}) # NEW changed column name.
+df = df.rename(columns={'trial': 'trial_num'}) # NEW changed column name.
 transition_df['basename'] = transition_df['basename'].str.lower() # All basenames to lowercase
 transition_df = transition_df.rename(columns={'taste': 'taste_num'}) # NEW changed column name.
 tau_basenames = transition_df.basename.unique() # Find all basenames in transition_df
 df = df.loc[df['basename'].isin(tau_basenames)] # Keep only basenames 
 # Manually removed this specific data:
-df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
-df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
+df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste_num'] == 1))]
+df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste_num'] == 4))]
+'''
+
+
+
 
 # ==============================================================================
 # Important variables to set
 # ==============================================================================
-window_len = 500 # Half of the total window
-fixed_transition_time = 2800# Set to math.nan or a fixed time from stimulus delivery (2000ms+). If this is not nan it will be used over chosen transition
-chosen_transition = 1 # Choose out of 0, 1, or 2 (palatability transition is 1); MAKE SURE TO SET ABOVE TO math.nan
+window_len = 500 # Half of the total window to evaluate around transition window
+fixed_transition_time = 2800# Set to np.nan or a fixed time from stimulus delivery (2000ms+). If this is not nan it will be used over chosen transition
+fixed_transition_time = np.nan# Set to np.nan or a fixed time from stimulus delivery (2000ms+). If this is not nan it will be used over chosen transition
+
+
+
+chosen_transition = 1 # Choose out of 0, 1, or 2 (palatability transition is 1); MAKE SURE TO SET ABOVE TO np.nan
 
 
 # ==============================================================================
@@ -85,53 +99,63 @@ def convert_taste_num_to_name(basename, taste_num, df):
         return None
 
 
-# %% IMPORTANT DATAFRAME SETUP
+
 # ==============================================================================
+# %% IMPORTANT DATAFRAME SETUP
 # Re-structure transition dataframe
 # Create DataFrame of events around the transition
 # ==============================================================================
-# Initialize lists to store the expanded data
-basename_list = []
-taste_num_list = []
-trial_num_list = []
-scaled_mode_tau_list = []
 
+# Initialize dataframe that will contain every transition time for every trial
+expanded_df = df[['taste_num', 'trial_num', 'basename']].drop_duplicates().reset_index(drop=True)
 
-# Iterate over each row in the original dataframe
-for i, row in transition_df.iterrows():
-    basename = row['basename']
-    taste_num = row['taste_num']
-    scaled_mode_tau = row['scaled_mode_tau']
+# Set transition times, 
+if np.isnan(fixed_transition_time):
+    print(f"Using chosen transition #{chosen_transition}")
+    for i, row in expanded_df.iterrows():
+        basename = row['basename']
+        taste_num = str(row['taste_num'])
+        scaled_mode_tau_row = transition_df[(transition_df['basename'] == basename) & 
+                                        (transition_df['taste_num'] == taste_num)]
+        if scaled_mode_tau_row.empty:
+            print(f"No match for {basename} and {taste_num}")
+        else:
+            scaled_mode_tau = scaled_mode_tau_row['scaled_mode_tau'].values[0]
+            
+            for trial_num, transition_set in enumerate(scaled_mode_tau):
+                tau_value = transition_set[chosen_transition]
+                
+                mask = ((expanded_df['basename'] == basename) &
+                    (expanded_df['taste_num'] == int(taste_num)) &
+                    (expanded_df['trial_num'] == trial_num))
+                
+                expanded_df.loc[mask, 'scaled_mode_tau'] = tau_value
+
+elif fixed_transition_time > 2000:
+    print(f"Using fixed transition time of {fixed_transition_time}")
+    expanded_df['scaled_mode_tau'] = fixed_transition_time
+else:
+    print("Something's wrong with the chosen transition timing variable")
     
-    # Iterate over the 30 elements in 'scaled_mode_tau'
-    for trial_num, tau_array in enumerate(scaled_mode_tau):
-        basename_list.append(basename)
-        taste_num_list.append(taste_num)
-        trial_num_list.append(trial_num)
-        scaled_mode_tau_list.append(tau_array[chosen_transition])
+if 'scaled_mode_tau' not in expanded_df.columns:
+    raise ValueError("'scaled_mode_tau' column is missing")
+elif expanded_df['scaled_mode_tau'].isna().any():
+    print("Warning: Some trials are missing a transition time")
 
-# Create the new dataframe
-expanded_df = pd.DataFrame({
-    'basename': basename_list,
-    'taste_num': taste_num_list,
-    'trial_num': trial_num_list,
-    'scaled_mode_tau': scaled_mode_tau_list
-})
-expanded_df['basename'] = expanded_df['basename'].str.lower()
 
 
 # Create DataFrame that only contains events that are whithin the transition window
 rows = []
 
-for i in range(len(expanded_df)):
+for i in tqdm(range(len(expanded_df))):
 #for i in range(1):
     session_df = df[df['session_ind'] == i]
     for index, row in session_df.iterrows():
         segment_bounds = row['segment_bounds']
-        trial = row['trial']
-        taste = row['taste']
+        trial = row['trial_num']
+        taste = row['taste_num']
         basename = row['basename'].lower()
-        if math.isnan(fixed_transition_time):
+        if np.isnan(fixed_transition_time):
             transition_time_point = expanded_df.loc[
                 (expanded_df['trial_num'] == trial) & 
                 (expanded_df['taste_num'] == str(taste)) & 
@@ -144,6 +168,31 @@ for i in range(len(expanded_df)):
         window_start = transition_time_point - window_len
         window_end = transition_time_point + window_len
 
+
+        # Check segment bounds and adjust
+        start_in = window_start <= segment_bounds[0] <= window_end
+        end_in = window_start <= segment_bounds[1] <= window_end
+
+        if start_in and end_in:
+            new_bounds = (segment_bounds[0] - window_start, segment_bounds[1] - window_start)
+            row['time_from_trial_start'] = new_bounds
+            rows.append(row)
+
+        elif end_in:
+            cut_idx = window_start - segment_bounds[0]
+            row['segment_bounds'] = (window_start, segment_bounds[1])
+            row['time_from_trial_start'] = (0, segment_bounds[1] - window_start)
+            row['segment_raw'] = row['segment_raw'][cut_idx:]
+            rows.append(row)
+
+        elif start_in:
+            cut_idx = window_end - segment_bounds[0]
+            row['segment_bounds'] = (segment_bounds[0], window_end)
+            row['time_from_trial_start'] = (segment_bounds[0] - window_start, 2 * window_len)
+            row['segment_raw'] = row['segment_raw'][:cut_idx]
+            rows.append(row)
+
+        '''
         # Append wavelength with adjusted start/stops if wavelength is within the window
         if window_start <= segment_bounds[0] <= window_end and window_start <= segment_bounds[1] <= window_end:
             new_row = row.copy()  # Copy row to modify it safely
@@ -165,7 +214,7 @@ for i in range(len(expanded_df)):
             cut_idx = window_end - segment_bounds[0]
             new_row['segment_raw'] = row['segment_raw'][:cut_idx]
             rows.append(new_row)
-
+        '''
 
             
 # Create a DataFrame from the list of rows
@@ -180,8 +229,8 @@ transition_events_df = transition_events_df.drop(columns = ['segment_norm_interp
 # Adding column with before/after event position designation for each waveform
 # ==============================================================================
 
-lookup_df = transition_events_df[['taste', 'taste_name', 'basename']].drop_duplicates()
-grouped = transition_events_df.groupby(['basename', 'taste'])
+lookup_df = transition_events_df[['taste_num', 'taste_name', 'basename']].drop_duplicates()
+grouped = transition_events_df.groupby(['basename', 'taste_num'])
 
 transition_events_df['event_position'] = np.nan
 
@@ -192,9 +241,9 @@ for idx, row in transition_events_df.iterrows():
     transition_events_df.at[idx, 'event_position'] = event_position
 
      
-# %% UMAP of MTM features by test session
+
 # ==============================================================================
-# UMAP of waveforms by test session
+# %% UMAP of MTM features by test session
 # ==============================================================================
 
 
@@ -207,7 +256,7 @@ for file in files:
 
 
 p_val_dict = {}
-n_iterations = 10
+n_iterations = 1
 
 unique_sessions = transition_events_df['basename'].unique()
 for n in tqdm(range(n_iterations)):
@@ -423,11 +472,41 @@ sns.displot(
 )
 plt.show()
 
-# %% UMAP of all MTM features
+
 # ==============================================================================
-# UMAP of all MTM features
+# %% UMAP of MTM features by sessions
 # ==============================================================================
 
 
+for basename in unique_sessions:
 
-
+    session_mtm_df = transition_events_df[(transition_events_df['event_type'] == 'MTMs') & 
+                                          (transition_events_df['basename'] == basename)]
+    session_mtm_features = np.stack(session_mtm_df.features.values)
+    session_mtm_df = session_mtm_df.reset_index(drop=True)
+    
+    
+    reducer = umap.UMAP()
+    session_scaled_mtm_features = StandardScaler().fit_transform(session_mtm_features) # Scale features
+    session_embedding = reducer.fit_transform(session_scaled_mtm_features) # UMAP embedding
+    
+    
+    session_embedding_df = pd.DataFrame({
+        'x': session_embedding[:, 0],
+        'y': session_embedding[:, 1],
+        'event_position': session_mtm_df['event_position'].values
+    })
+    
+    
+    sns.displot(
+        data=session_embedding_df,
+        x='x',
+        y='y',
+        hue='event_position',
+        kind='kde',
+        height=6,
+        aspect=1
+    )
+    plt.title(basename)
+    
+    plt.show()
