@@ -31,7 +31,11 @@ from matplotlib.colors import TwoSlopeNorm
 dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
 df = pd.read_pickle(file_path)
-transition_df = pd.read_pickle(file_path)
+df = df[~df['laser']]
+
+transition_df = pd.read_pickle(file_path) # Replace with another path if you want to use real transtiion times (something like scaled_mode_tau.pkl)
+
+
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
@@ -64,7 +68,7 @@ df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste
 # ==============================================================================
 window_len = 500 # Half of the total window to evaluate around transition window
 fixed_transition_time = 2800# Set to np.nan or a fixed time from stimulus delivery (2000ms+). If this is not nan it will be used over chosen transition
-fixed_transition_time = np.nan# Set to np.nan or a fixed time from stimulus delivery (2000ms+). If this is not nan it will be used over chosen transition
+#fixed_transition_time = np.nan# Set to np.nan or a fixed time from stimulus delivery (2000ms+). If this is not nan it will be used over chosen transition
 
 
 
@@ -143,8 +147,12 @@ elif expanded_df['scaled_mode_tau'].isna().any():
     print("Warning: Some trials are missing a transition time")
 
 
+# ADDING UNIQUE SESSION INDs RELATED TO BASENAMES
+# TODO: MAKE THIS PART OF INITIALIZING THE DATAFRAME
+basename_to_index = {name: i for i, name in enumerate(df['basename'].unique())}
+df['session_ind'] = df['basename'].map(basename_to_index)
 
-# Create DataFrame that only contains events that are whithin the transition window
+# Create DataFrame that only contains events that are within the transition window
 rows = []
 
 for i in tqdm(range(len(expanded_df))):
@@ -256,7 +264,7 @@ for file in files:
 
 
 p_val_dict = {}
-n_iterations = 1
+n_iterations = 10
 
 unique_sessions = transition_events_df['basename'].unique()
 for n in tqdm(range(n_iterations)):
@@ -292,6 +300,8 @@ for n in tqdm(range(n_iterations)):
             g.fig.suptitle(f'{basename}')
             fig_path = os.path.join(fig_dir, f'{basename}_countour_plot.png')
             plt.savefig(fig_path)
+            fig_path_svg = os.path.join(fig_dir, f'{basename}_countour_plot.svg')
+            plt.savefig(fig_path_svg)
             
         before_values = embedding_df[embedding_df['event_position'] == 'before']
         after_values = embedding_df[embedding_df['event_position'] == 'after']
@@ -398,22 +408,28 @@ plot_df = pd.DataFrame([
 ])
 plot_df['session'] = pd.factorize(plot_df['basename'])[0]
 
-for index, row in plot_df.iterrows():
-    basename = row['basename']
-    if basename =='km29_dual_4tastes_emg_200620_165523_copy':
-        plot_df['session'][index] = 'KM29_1'
-    elif basename =='km29_dual_4tastes_emg_200621_155031':
-        plot_df['session'][index] = 'KM29_2'
-    elif basename =='km45_5tastes_210620_113227_copy':
-        plot_df['session'][index] = 'KM45_1'
-    elif basename =='km50_5tastes_emg_210911_104510_copy':
-        plot_df['session'][index] = 'KM50_1'
-    elif basename =='km50_5tastes_emg_210913_100710_copy':
-        plot_df['session'][index] = 'KM50_2'
-    elif basename =='nb33_test1_3tastes_240308_131055':
-        plot_df['session'][index] = 'NB33_1'
-    elif basename =='nb33_test2_4tastes_240309_134153':
-        plot_df['session'][index] = 'NB33_2'       
+
+
+#Make basenames more concise for x-axis tick labels
+basename_to_session = {}
+prefix_counts = {}
+
+for basename in plot_df['basename'].unique():
+    prefix = basename.split('_')[0]
+    count = prefix_counts.get(prefix, 1)
+
+    session_name = f"{prefix}_{count}"
+    basename_to_session[basename] = session_name
+    prefix_counts[prefix] = count + 1
+    
+plot_df['session'] = plot_df['basename'].map(basename_to_session)
+
+
+
+# Define the path to your desktop (works on most systems)
+desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+save_path = os.path.join(desktop_path, "divergence_pvalues_plot.svg")
+
 
 # Plot
 plt.figure(figsize=(10, 9))
@@ -428,11 +444,12 @@ plt.axhline(y=0.05, color='red', linestyle='--',
 
 plt.title("Divergence P-values by Session")
 plt.ylabel("P-value", fontsize=18, labelpad=10)
-plt.ylim(-0.002, 0.055)
+plt.ylim(-0.002, 0.08)
 plt.xlabel("Session", fontsize=18, labelpad=10)
-plt.xticks(fontsize=14)
+plt.xticks(fontsize=14, rotation=45)
 plt.yticks(fontsize=14)
 
+plt.savefig(save_path, format='svg', bbox_inches='tight')
 plt.show()
 
 

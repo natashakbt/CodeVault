@@ -31,6 +31,7 @@ from scipy.stats import ks_2samp
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
+'''
 dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
@@ -47,6 +48,12 @@ df = df.loc[df['basename'].isin(tau_basenames)] # Keep only basenames
 # Manually removed this specific data:
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
+
+'''
+
+dirname = '/home/natasha/Desktop/clustering_data/'
+file_path = os.path.join(dirname, 'clustering_df_update.pkl')
+df = pd.read_pickle(file_path)
 
 
 feature_names = [
@@ -218,7 +225,7 @@ for label in sorted(final_waveforms_df['pred_label'].unique()):
 # Building average confusion matrix and std
 matrices_as_array = np.array(confusion_matrices)
 average_matrix = matrices_as_array.mean(axis=0)
-std_matrix = matrices_as_array.std(axis=0) # TODO IS THIS THE RIGHT W
+std_matrix = matrices_as_array.std(axis=0)
 
 # Plot the average confusion matrix with black and white colormap
 plt.figure(figsize=(10, 10))  # Adjust size as needed
@@ -251,9 +258,10 @@ plt.title("Average Confusion Matrix")
 
 # Show the plot
 plt.tight_layout()
+
+# Save the plot
+plt.savefig("/home/natasha/Desktop/final_figures/my_plot.svg", format="svg")
 plt.show()
-
-
 # Perform a one-sample t-test
 t_stat, p_value = stats.ttest_1samp(accuracy_scores, 0.3)
 if p_value < 0.05:

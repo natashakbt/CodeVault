@@ -23,6 +23,7 @@ from scipy.optimize import curve_fit
 import piecewise_regression
 from scipy.stats import ttest_rel
 import scipy.stats as stats
+from tqdm import tqdm
 
 # ==============================================================================
 # Load data and get setup
@@ -30,27 +31,31 @@ import scipy.stats as stats
 dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
+df['taste_name'] = df['taste_name'].replace('quic', 'quinc') # Fix typo in taste name
 
-transition_file_path = os.path.join(dirname, 'scaled_mode_tau_cut.pkl')
-transition_df = pd.read_pickle(transition_file_path)
+# Combining tastes names even though concentrations are slightly different. 
+# Justification based on Grill & Norgren taste reactivity results based on different concentrations
+df['taste_name'] = df['taste_name'].replace('succ', 'suc') 
+df['taste_name'] = df['taste_name'].replace('sucd', 'suc')
+df['taste_name'] = df['taste_name'].replace('quinc', 'qhcl')
 
-# Remove any data for df that does not have an associated transition time in scaled_mode_tau
-df['basename'] = df['basename'].str.lower() # All basenames to lowercase
-transition_df['basename'] = transition_df['basename'].str.lower() # All basenames to lowercase
-transition_df = transition_df.rename(columns={'taste': 'taste_num'}) # NEW changed column name.
-tau_basenames = transition_df.basename.unique() # Find all basenames in transition_df
-df = df.loc[df['basename'].isin(tau_basenames)] # Keep only basenames 
-# Manually removed this specific data:
-df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
-df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
 
 # ==============================================================================
 # Important variables to set
 # ==============================================================================
 window_len = 500 # Half of the total window
-fixed_transition_time = math.nan # Set to math.nan or a fixed time from stimulus delivery (2000ms+). If this is not nan it will be used over chosen transition
-chosen_transition = 1 # Choose out of 0, 1, or 2 (palatability transition is 1); MAKE SURE TO SET ABOVE TO math.nan
+fixed_transition_time = 2800 # Set to math.nan or a fixed time from stimulus delivery (2000ms+). If this is not nan it will be used over chosen transition
 
+# =============================================================================
+# Define a color mapping for cluster numbers
+# =============================================================================
+color_mapping = {
+    -1: '#ff9900',      # Gapes Color for cluster -1
+    -2: '#D3D3D3',      # No mvoement Color for cluster 0
+     0: '#4285F4',     # Color for cluster 1
+     1: '#88498F',    # Color for cluster 2
+     2: '#0CBABA'        # Color for cluster 3
+}
 
 # ==============================================================================
 # Define functions
@@ -71,7 +76,7 @@ def sigmoid(x, L ,x0, k, b):
 
 def convert_taste_num_to_name(basename, taste_num, df):
     result = df.loc[
-        (df['basename'] == basename) & (df['taste'] == taste_num), 'taste_name'
+        (df['basename'] == basename) & (df['taste_num'] == taste_num), 'taste_name'
     ]
     if not result.empty:
         return result.iloc[0]
@@ -80,152 +85,84 @@ def convert_taste_num_to_name(basename, taste_num, df):
         return None
 
 
-# %% IMPORTANT DATAFRAME SETUP
+# %% GETTING ALL EVENTS WITHIN THE TRANSITION WINDOW
 # ==============================================================================
-# Re-structure transition dataframe
-# Create DataFrame of events around the transition
-# ==============================================================================
-# Initialize lists to store the expanded data
-basename_list = []
-taste_num_list = []
-trial_num_list = []
-scaled_mode_tau_list = []
-
-
-# Iterate over each row in the original dataframe
-for i, row in transition_df.iterrows():
-    basename = row['basename']
-    taste_num = row['taste_num']
-    scaled_mode_tau = row['scaled_mode_tau']
-    
-    # Iterate over the 30 elements in 'scaled_mode_tau'
-    for trial_num, tau_array in enumerate(scaled_mode_tau):
-        basename_list.append(basename)
-        taste_num_list.append(taste_num)
-        trial_num_list.append(trial_num)
-        scaled_mode_tau_list.append(tau_array[chosen_transition])
-
-# Create the new dataframe
-expanded_df = pd.DataFrame({
-    'basename': basename_list,
-    'taste_num': taste_num_list,
-    'trial_num': trial_num_list,
-    'scaled_mode_tau': scaled_mode_tau_list
-})
-expanded_df['basename'] = expanded_df['basename'].str.lower()
-
-
 # Create DataFrame that only contains events that are whithin the transition window
+# ==============================================================================
+
 rows = []
 
-for i in range(len(expanded_df)):
-#for i in range(1):
-    session_df = df[df['session_ind'] == i]
-    for index, row in session_df.iterrows():
-        segment_bounds = row['segment_bounds']
-        trial = row['trial']
-        taste = row['taste']
-        basename = row['basename'].lower()
-        if math.isnan(fixed_transition_time):
-            transition_time_point = expanded_df.loc[
-                (expanded_df['trial_num'] == trial) & 
-                (expanded_df['taste_num'] == str(taste)) & 
-                (expanded_df['basename'] == basename), 
-                'scaled_mode_tau'
-            ].values[0]
-        else:
-            transition_time_point = fixed_transition_time # to align to fixed palatability transition
-        
-        window_start = transition_time_point - window_len
-        window_end = transition_time_point + window_len
+for index, row in df.iterrows():
+    transition_time_point = fixed_transition_time # to align to fixed palatability transition
+    window_start = transition_time_point - window_len
+    window_end = transition_time_point + window_len
+    segment_bounds = row['segment_bounds']
+    # Append wavelength with adjusted start/stops if wavelength is within the window
+    if window_start <= segment_bounds[0] <= window_end and window_start <= segment_bounds[1] <= window_end:
+        new_row = row.copy()  # Copy row to modify it safely
+        new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, segment_bounds[1] - window_start) # Alter segment time to be from trial start
+        rows.append(new_row)
 
-        # Append wavelength with adjusted start/stops if wavelength is within the window
-        if window_start <= segment_bounds[0] <= window_end and window_start <= segment_bounds[1] <= window_end:
-            new_row = row.copy()  # Copy row to modify it safely
-            new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, segment_bounds[1] - window_start) # Alter segment time to be from trial start
-            rows.append(new_row)
-        # Adjust wavelength stop time if ends after the window
-        elif window_start <= segment_bounds[1] <= window_end:
-            new_row = row.copy()
-            new_row['segment_bounds'] = (window_start, segment_bounds[1])
-            new_row['time_from_trial_start'] = (0, segment_bounds[1] - window_start)
-            cut_idx = window_start - segment_bounds[0]
-            new_row['segment_raw'] = row['segment_raw'][cut_idx:]
-            rows.append(new_row)
-        # Adjust wavelength start time if it starts before the window
-        elif window_start <= segment_bounds[0] <= window_end:
-            new_row = row.copy()
-            new_row['segment_bounds'] = (segment_bounds[0], window_end)
-            new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, window_len*2)
-            cut_idx = window_end - segment_bounds[0]
-            new_row['segment_raw'] = row['segment_raw'][:cut_idx]
-            rows.append(new_row)
+    # Adjust wavelength stop time if ends after the window
+    elif window_start <= segment_bounds[1] <= window_end:
+        new_row = row.copy()
+        new_row['segment_bounds'] = (window_start, segment_bounds[1])
+        new_row['time_from_trial_start'] = (0, segment_bounds[1] - window_start)
+        cut_idx = window_start - segment_bounds[0]
+        new_row['segment_raw'] = row['segment_raw'][cut_idx:]
+        rows.append(new_row)
 
+    # Adjust wavelength start time if it starts before the window
+    elif window_start <= segment_bounds[0] <= window_end:
+        new_row = row.copy()
+        new_row['segment_bounds'] = (segment_bounds[0], window_end)
+        new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, window_len*2)
+        cut_idx = window_end - segment_bounds[0]
+        new_row['segment_raw'] = row['segment_raw'][:cut_idx]
+        rows.append(new_row)
 
-            
 # Create a DataFrame from the list of rows
 transition_events_df = pd.DataFrame(rows).reset_index(drop=True)
-transition_events_df = transition_events_df.drop(columns = ['segment_norm_interp'])
+#transition_events_df = transition_events_df.drop(columns = ['segment_norm_interp'])
 
 
 
-# %% EMG WAVEFORMS AROUND TRANSITION
+# %% PLOT EMG WAVEFORMS AROUND TRANSITION
 # ==============================================================================
 # Plot EMG waveforms with behavior label around the transition, 1 plot per trial
 # ==============================================================================
-# Find unique combinations of trial, taste, and session_ind
-unique_combinations = transition_events_df.groupby(['trial', 'taste', 'basename'])
 
+# Initialize directory folder for figures to save into
 emg_dir = os.path.join(dirname, 'EMG_around_transition')
 os.makedirs(emg_dir, exist_ok=True)
-
 # Remove everything in emg_dir
-for item in os.listdir(emg_dir):  # List everything inside the directory
+for item in os.listdir(emg_dir):
     item_path = os.path.join(emg_dir, item)
     if os.path.isfile(item_path):
-        os.remove(item_path)  # Delete file
+        os.remove(item_path)
     elif os.path.isdir(item_path):
-        shutil.rmtree(item_path)  # Delete subdirectory and its contents
+        shutil.rmtree(item_path)
         
 # =============================================================================
-#transition_events_df['event_type'] = transition_events_df['event_type'].astype('category')
-#transition_events_df['pred_event_code'] = transition_events_df.event_type.cat.codes
-#unique_event_codes = transition_events_df.pred_event_code.unique()
 
-#cmap = plt.cm.get_cmap('tab10')
 # =============================================================================
-# Define a color mapping for cluster numbers
-color_mapping = {
-    -1: '#ff9900',      # Gapes Color for cluster -1
-    -2: '#D3D3D3',      # No mvoement Color for cluster 0
-     0: '#4285F4',     # Color for cluster 1
-     1: '#88498F',    # Color for cluster 2
-     2: '#0CBABA'        # Color for cluster 3
-}
 
 # Group by basename (session), taste, and trial
-grouped = transition_events_df.groupby(['basename', 'taste', 'trial'])
+grouped = transition_events_df.groupby(['basename', 'taste_name', 'trial_num'])
 
-for (basename, taste, trial), group in grouped:
+for (basename, taste_name, trial_num), group in tqdm(grouped):
+    print(basename, taste_name)
     
     basename_dir = os.path.join(emg_dir, basename)
     os.makedirs(basename_dir, exist_ok=True)  # Ensure the folder is created
-    plt.close()
+
     plt.figure(figsize=(10, 6))
     
     # Initialize variables to hold the last point of the previous waveform
     prev_end_time = None
     prev_end_value = None
     
-    if fixed_transition_time.isnan():
-        transition_time_point = expanded_df.loc[
-            (expanded_df['trial_num'] == trial) & 
-            (expanded_df['taste_num'] == str(taste)) & 
-            (expanded_df['basename'] == basename), 
-            'scaled_mode_tau'
-        ].values[0]
-    else:
-        transition_time_point = fixed_transition_time # to align to fixed palatability transition
+    transition_time_point = fixed_transition_time # to align to fixed palatability transition
     
     # Iterate through each row within the group (i.e. each segment)
     for _, row in group.iterrows():
@@ -235,7 +172,7 @@ for (basename, taste, trial), group in grouped:
 
         # Adjust segment bounds relative to the transition time
         segment_bounds_adjusted = [segment_bounds[0] - transition_time_point, segment_bounds[1] - transition_time_point]
-        print(segment_bounds_adjusted)
+        #print(segment_bounds_adjusted)
         # Create time values using the adjusted segment bounds
         if segment_bounds_adjusted[0] == segment_bounds_adjusted[1]:
             continue
@@ -262,46 +199,36 @@ for (basename, taste, trial), group in grouped:
     plt.xlim([-(window_len), window_len])  # Set x-axis limits centered around the transition (0 ms)
     
     # Add titles and labels
-    plt.title(f"Waveforms for Trial {trial}, Taste {taste}, {basename}")
+    plt.title(f"Waveforms for Trial {trial_num}, {taste_name}, {basename}")
     plt.xlabel('Time (ms)')
     plt.ylabel('Waveform Amplitude')
     plt.plot()
     
     # Save the plot
-    emg_all_path = os.path.join(basename_dir, f'trial{trial}_taste{taste}_{basename}_emg.png')
+    emg_all_path = os.path.join(basename_dir, f'trial{trial_num}_{taste_name}_{basename}_emg.png')
     plt.savefig(emg_all_path)
     plt.clf()
+    plt.close()
 
 
-# %% BEHAVIOR RASTER PLOT
+# %% BEHAVIOR RASTER PLOT - ALL CLUSTERS ON - OLD CODE; DO NOT USE
+# NEED TO RUN THIS TO BUILD SUMMARY_DF
 # ==============================================================================
 # Raster plot of events around the transition, 1 plot per session per taste
 # ==============================================================================
-
-color_mapping = {
-    -1: '#ff9900',      # Gapes Color for cluster -1
-    -2: '#D3D3D3',      # No mvoement Color for cluster 0
-     0: '#4285F4',     # Color for cluster 1
-     1: '#88498F',    # Color for cluster 2
-     2: '#0CBABA'        # Color for cluster 3
-}
-
-
-lookup_df = transition_events_df[['taste', 'taste_name', 'basename']].drop_duplicates()
-
+'''
+# Create and clear folder directory for figures
 clust_dir = os.path.join(dirname, 'cluster_raster_transition')
 os.makedirs(clust_dir, exist_ok=True)
-
-# Clear the folder by deleting all files within it
 files = glob.glob(os.path.join(clust_dir, '*'))
 for file in files:
-    os.remove(file)  # Remove each file
+    os.remove(file)
 
 # Initialize an empty list to store the rows for the final dictionary
 summary_data = []
 
 # Group by basename (session) and taste
-grouped = transition_events_df.groupby(['basename', 'taste'])
+grouped = transition_events_df.groupby(['basename', 'taste_num'])
 
 # Create a figure and populate the dictionary
 for basename, taste_group in grouped:
@@ -309,22 +236,22 @@ for basename, taste_group in grouped:
     taste = basename[1]
     basename = basename[0]
 
-    # Create a subplot for each taste
-    num_tastes = len(taste_group['taste'].unique())
+    # Create a subplot for each taste_num
+    num_tastes = len(taste_group['taste_name'].unique())
     fig, axs = plt.subplots(nrows=num_tastes, figsize=(8, 10), sharex=True, sharey=True)
     
     # Ensure axs is always treated as an iterable
     if num_tastes == 1:
         axs = [axs]  # Make axs a list if there's only one subplot
 
-    for ax, (taste, trial_group) in zip(axs, taste_group.groupby('taste')):
-        ax.set_title(f"Taste: {taste}")
+    for ax, (taste, trial_group) in zip(axs, taste_group.groupby('taste_num')):
+        ax.set_title(f"Taste: {taste_num}")
 
         # Collect all cluster_num values for the current taste and trial
         all_cluster_nums = []
 
         # Loop through each trial and plot it as a block along time
-        for trial, trial_data in trial_group.groupby('trial'):
+        for trial, trial_data in trial_group.groupby('trial_num'):
             if math.isnan(fixed_transition_time):
                 transition_time_point = expanded_df.loc[
                     (expanded_df['trial_num'] == trial) & 
@@ -355,15 +282,16 @@ for basename, taste_group in grouped:
                 event_position = "before" if segment_bounds[1] < transition_time_point else "after"
                 
                 
-                taste_name = convert_taste_num_to_name(basename, taste, lookup_df)
+                #taste_name = convert_taste_num_to_name(basename, taste_num, lookup_df)
+                taste_name = trial_data['taste_name'].iloc[0]
                 
                 # Add to the summary_data list
                 summary_data.append({
                     'basename': basename,
-                    'taste': taste,
+                    'taste_num': taste_num,
                     'cluster_num': cluster_num,
                     'event_position': event_position,
-                    'trial': trial,
+                    'trial': trial_num,
                     'taste_name': taste_name
                 })
 
@@ -371,7 +299,7 @@ for basename, taste_group in grouped:
             ax.set_xlim([-(window_len), window_len])  # Set limits from -500 to 500 ms
             ax.axvline(0, color='k', linestyle='--')  # Add a vertical line at transition time (0 ms)
 
-        ax.set_ylabel(f'Trial {trial}')
+        ax.set_ylabel(f'Trial {trial_num}')
         ax.set_xlabel('Time (ms)')
 
         # Print the vector of all cluster_num values for this trial group
@@ -383,92 +311,128 @@ for basename, taste_group in grouped:
     plt.savefig(clust_all_path)
     plt.clf()
 
+'''
 
-# %% BEHAVIOR RASTER PLOT - FOR A SINGLE CLUSTER NUM (Don't run this then run code below)
+# %% BEHAVIOR RASTER PLOT - ALL CLUSTERS ON - NEED TO RUN FOR STATS LATER
+# NEED TO RUN THIS TO BUILD SUMMARY_DF
+# ==============================================================================
+# Raster plot of events around the transition, 1 plot per session per taste
+# ==============================================================================
+# Create and clear folder directory for figures
+clust_dir = os.path.join(dirname, 'cluster_raster_transition')
+os.makedirs(clust_dir, exist_ok=True)
+files = glob.glob(os.path.join(clust_dir, '*'))
+for file in files:
+    os.remove(file)
+
+# Initialize an empty list to store the rows for the final dictionary
+summary_data = []
+
+# Group by basename and taste
+grouped = transition_events_df.groupby(['basename', 'taste_name'])
+
+for (basename, taste_name), taste_group in tqdm(grouped):
+    fig, ax = plt.subplots(figsize=(8, 10))
+    ax.set_title(f"Taste: {taste_name}")
+
+    for trial, trial_data in taste_group.groupby('trial_num'):
+        transition_time_point = fixed_transition_time
+
+        for _, row in trial_data.iterrows():
+            cluster_num = row['cluster_num']
+            color = color_mapping.get(cluster_num, 'black')
+
+            segment_bounds = row['segment_bounds']
+            aligned_start = segment_bounds[0] - transition_time_point
+            aligned_end = segment_bounds[1] - transition_time_point
+
+            ax.fill_between(
+                [aligned_start, aligned_end],
+                trial - 0.5, trial + 0.5,
+                color=color
+            )
+
+            event_position = "before" if segment_bounds[1] < transition_time_point else "after"
+
+            summary_data.append({
+                'basename': basename,
+                'taste_name': taste_name,
+                'cluster_num': cluster_num,
+                'event_position': event_position,
+                'trial': trial,
+                'taste_name': taste_name
+            })
+
+    ax.set_xlim([-(window_len), window_len])
+    ax.axvline(0, color='k', linestyle='--')
+    ax.set_ylabel('Trial')
+    ax.set_xlabel('Time (ms)')
+    plt.suptitle(f'{basename}')
+    plt.tight_layout()
+
+    clust_all_path = os.path.join(clust_dir, f'{taste_name}_{basename}_cluster_raster.png')
+    plt.savefig(clust_all_path)
+    plt.close(fig)  # closes and frees memory
+
+
+
+# %% BEHAVIOR RASTER PLOT - Blocks FOR A SINGLE CLUSTER NUM
 # ==============================================================================
 # Raster plot of events around the transition, 1 plot per session per taste
 # ==============================================================================
 
-# Create lookup table
-lookup_df = transition_events_df[['taste', 'taste_name', 'basename']].drop_duplicates()
+desired_clust_to_plot = 1 # which cluster_num to plot?
 
-# Clear and recreate directory (optional: just here for context)
-clust_dir = os.path.join(dirname, 'cluster_raster_transition')
-os.makedirs(clust_dir, exist_ok=True)
-for file in glob.glob(os.path.join(clust_dir, '*')):
+# Clear and create folder directory
+single_clust_dir = os.path.join(dirname, 'single_cluster_raster_transition')
+os.makedirs(single_clust_dir, exist_ok=True)
+for file in glob.glob(os.path.join(single_clust_dir, '*')):
     os.remove(file)
 
-# Initialize summary list
-summary_data = []
-
 # Group by basename (session) and taste
-grouped = transition_events_df.groupby(['basename', 'taste'])
+grouped = transition_events_df.groupby(['basename', 'taste_num'])
 
-# Loop over groups
-for basename_tuple, taste_group in grouped:
-    
-    basename = basename_tuple[0]
-    taste = basename_tuple[1]
+for (basename, taste), taste_group in grouped:
+    fig, ax = plt.subplots(figsize=(10, 8))
+    taste_name = convert_taste_num_to_name(basename, taste, df)
+    ax.set_title(f"Taste: {taste_name}")
 
+    for trial, trial_data in taste_group.groupby('trial_num'):
+        if math.isnan(fixed_transition_time):
+            transition_time_point = expanded_df.loc[
+                (expanded_df['trial_num'] == trial) & 
+                (expanded_df['taste_num'] == str(taste)) & 
+                (expanded_df['basename'] == basename), 
+                'scaled_mode_tau'
+            ].values[0]
+        else:
+            transition_time_point = fixed_transition_time
 
-    #if basename != 'nb33_test1_3tastes_240308_131055':
-    #    continue
-    # Create a subplot for each taste
-    num_tastes = len(taste_group['taste'].unique())
-    fig, axs = plt.subplots(nrows=num_tastes, figsize=(10, 8), sharex=True, sharey=True)
-    
-    # Ensure axs is iterable
-    if num_tastes == 1:
-        axs = [axs]
+        for _, row in trial_data.iterrows():
+            cluster_num = row['cluster_num']
+            if cluster_num != desired_clust_to_plot:
+                continue
 
-    for ax, (taste, trial_group) in zip(axs, taste_group.groupby('taste')):
-        taste_name_2 = convert_taste_num_to_name(basename, taste, df)
-        ax.set_title(f"Taste: {taste_name_2}")
+            segment_bounds = row['segment_bounds']
+            start = segment_bounds[0] - transition_time_point
+            end = segment_bounds[1] - transition_time_point
+            ax.hlines(y=trial, xmin=start, xmax=end,
+                      color=color_mapping.get(cluster_num, 'black'), linewidth=8)
 
-        for trial, trial_data in trial_group.groupby('trial'):
-            # Get transition time (from fixed or from expanded_df)
-            if math.isnan(fixed_transition_time):
-                transition_time_point = expanded_df.loc[
-                    (expanded_df['trial_num'] == trial) & 
-                    (expanded_df['taste_num'] == str(taste)) & 
-                    (expanded_df['basename'] == basename), 
-                    'scaled_mode_tau'
-                ].values[0]
-            else:
-                transition_time_point = fixed_transition_time
-
-            for _, row in trial_data.iterrows():
-                cluster_num = row['cluster_num']
-                if cluster_num != 0:
-                    continue  # Only plot cluster specified behaviors
-
-                segment_bounds = row['segment_bounds']
-                center_time = (segment_bounds[0] + segment_bounds[1]) / 2
-                aligned_time = center_time - transition_time_point
-
-                color = color_mapping.get(cluster_num, 'black')
-                ax.plot(aligned_time, trial, 'o', color=color, markersize=18)
-
-                event_position = "before" if segment_bounds[1] < transition_time_point else "after"
-                taste_name = convert_taste_num_to_name(basename, taste, lookup_df)
-
-                summary_data.append({
-                    'basename': basename,
-                    'taste': taste,
-                    'cluster_num': cluster_num,
-                    'event_position': event_position,
-                    'trial': trial,
-                    'taste_name': taste_name
-                })
-
-        ax.set_xlim([-(window_len), window_len])
-        ax.axvline(0, color='k', linestyle='--')
-        ax.set_ylabel('Trial')
-        ax.set_xlabel('Time (ms)')
-
+    ax.set_xlim([-(window_len), window_len])
+    ax.axvline(0, color='k', linestyle='--')
+    ax.set_ylabel('Trial')
+    ax.set_xlabel('Time (ms)')
     plt.suptitle(f'{basename}')
+
     plt.tight_layout()
-    plt.show()
+    png_path = os.path.join(single_clust_dir, f"{basename}_{taste_name}_transitions.png")
+    svg_path = os.path.join(single_clust_dir, f"{basename}_{taste_name}_transitions.svg")
+    plt.savefig(png_path)
+    plt.savefig(svg_path)
+    plt.close()
+
+
 
 
 
@@ -722,7 +686,7 @@ for _, row in unique_combinations.iterrows():
 # Convert results to DataFrame
 session_trial_results_df = pd.DataFrame(session_trial_results)
 
-
+'''
 print("\nT-TEST: every data point is a trial")
 for _,row in session_trial_results_df.iterrows():
     if row['ttest_pvalue'] < 0.05:
@@ -730,7 +694,7 @@ for _,row in session_trial_results_df.iterrows():
         taste = row['taste']
         cluster_num= row['cluster_num']
         print(f'{basename}: {taste} and cluster {cluster_num}')
-
+'''
         
 print("\nPOISSON MEANS TEST: every data point is a trial")
 # Print any significant results

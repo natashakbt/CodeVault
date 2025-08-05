@@ -24,16 +24,11 @@ from scipy.spatial.distance import mahalanobis
 # Load data and get setup
 # ==============================================================================
 dirname = '/home/natasha/Desktop/clustering_data/'
-#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl') # only events labelled by video scoring
 file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
 df = pd.read_pickle(file_path)
-df = df.rename(columns={'pred_event_type': 'event_type'})
+df = df[~df['laser']]
 
 unique_basenames = df['basename'].unique()
-basename_to_num = {name: idx for idx, name in enumerate(unique_basenames)}
-df['session_ind'] = df['basename'].map(basename_to_num)
-
-df.event_type = df.event_type.replace('mouth or tongue movement', 'MTMs')
 
 # Make a dataframe of just mouth or tongue movement events
 mtm_bool = df.event_type.str.contains('MTMs')
@@ -140,7 +135,7 @@ def calc_mahalanobis_distance_matrix(mtm_session_df):
 # ==============================================================================
 fixed_cluster_num = np.nan
 #fixed_cluster_num = 3
-iterations = 50# Number of times to repeat UMAP reduction
+iterations = 1# Number of times to repeat UMAP reduction #50 for randomization
 
 
 
@@ -189,8 +184,8 @@ else:
 
 # PCA with GMM on a session-by-session basis
 for session in df.session_ind.unique():
-    if session == 0:
-        continue
+    #if session == 0:
+    #    continue
     for i in range(iterations):
         # Filter data for the current session
         mtm_session_bool = mtm_df.session_ind == session
@@ -261,8 +256,10 @@ for session in df.session_ind.unique():
             plt.title(f'Session {session}: UMAP projection of PCA with GMM ({optimal_n_components} clusters)')
             cbar = plt.colorbar(scatter)
             cbar.set_ticks([])  # Set specific tick positions
-            umap_session_path = os.path.join(pca_dir, f'session_{session}_umap-of-PCA.png')
-            plt.savefig(umap_session_path)
+            umap_session_path_png = os.path.join(pca_dir, f'session_{session}_umap-of-PCA.png')
+            plt.savefig(umap_session_path_png)
+            umap_session_path_svg = os.path.join(pca_dir, f'session_{session}_umap-of-PCA.svg')
+            plt.savefig(umap_session_path_svg)
             plt.clf()
             
             if np.isnan(fixed_cluster_num):
@@ -274,8 +271,10 @@ for session in df.session_ind.unique():
                 plt.xlabel('Number of clusters')
                 plt.ylabel('BIC Score')
                 plt.title(f'Session {session}: BIC Scores. Elbow at {round(breakpoint1,3)}')
-                bic_session_path = os.path.join(pca_dir, f'session_{session}_bic.png')
-                plt.savefig(bic_session_path)
+                bic_session_path_png = os.path.join(pca_dir, f'session_{session}_bic.png')
+                plt.savefig(bic_session_path_png)
+                bic_session_path_svg = os.path.join(pca_dir, f'session_{session}_bic.png')
+                plt.savefig(bic_session_path_svg)
                 plt.clf()
             
             # Plot the mahalanobis matrix
@@ -289,8 +288,10 @@ for session in df.session_ind.unique():
             plt.title(f"Session {session}")
             cbar = plt.colorbar(im, ax=ax)
             cbar.set_label("Mahalanobis Distance")
-            mahal_session_path = os.path.join(mahal_dir, f'session_{session}_mahalanobis.png')
-            plt.savefig(mahal_session_path)
+            mahal_session_path_png = os.path.join(mahal_dir, f'session_{session}_mahalanobis.png')
+            plt.savefig(mahal_session_path_png)
+            mahal_session_path_svg = os.path.join(mahal_dir, f'session_{session}_mahalanobis.svg')
+            plt.savefig(mahal_session_path_svg)
             plt.clf()
       
 ## Histogram of mahalanobis diagonal vs non-diag values
@@ -379,7 +380,7 @@ plt.savefig(histogram_path)
 plt.show()
 plt.clf()
 
-#####################
+#### Optimal # of cluster distribution #########
 #### THIS ONE IS NICE!!!! #########
 rounded_numbers = [round(num) for num in optimal_cluster_list]
 #plt.hist(optimal_cluster_list, bins=len(n_components_range), 
@@ -388,7 +389,7 @@ plt.hist(rounded_numbers,
          color='0.8', 
          edgecolor='black',
          linewidth=2)
-plt.axvline(x=mode_result[0]+0.5, 
+plt.axvline(x=mode_result[0]+0.5, #add 0.5 to shift value because of bin sizes
             color='red', 
             linestyle='--', 
             linewidth=3.5)
@@ -399,6 +400,8 @@ plt.xlim(0.5, 14.5)
 
 # Center ticks on each bar with correct labels
 plt.xticks(ticks=np.arange(0.5, 15.0, 1), labels=np.arange(0, 15))
+plt.savefig("/home/natasha/Desktop/final_figures/optimal_cluster_freq.svg", format="svg")  # Save before show
+plt.savefig("/home/natasha/Desktop/final_figures/optimal_cluster_freq.png", format="png")  # Save before show
 plt.show()
     
 

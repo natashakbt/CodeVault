@@ -29,11 +29,12 @@ import pingouin as pg
 from scipy.stats import tukey_hsd
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 from scipy.stats import sem  # Standard error of the mean
-import umap
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 from scipy.stats import gaussian_kde
+import matplotlib.colors as mcolors
+
 
 # TODO: I THINK THIS CODE DOESN'T WORK AFTER THE LABELS HAVE BEEN STANDARDIZED ALREADY.
 # MAKE IT RE-RUN-ABLE FRIENDLY
@@ -45,12 +46,17 @@ dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
 
+'''
 # Remove any data for df that does not have an associated transition time in scaled_mode_tau
 df['basename'] = df['basename'].str.lower() # All basenames to lowercase
 
 # Manually removed this sepcific data:
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
 df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
+'''
+
+
+
 
 
 
@@ -591,6 +597,125 @@ for single_cluster_num in cluster_cycle:
         'segment': closest_row['segment_norm_interp']
     })
 
+
+
+
+
+
+
+# %%
+
+def nonlinear_alpha_cmap(hex_color, n_levels=256, gamma=3.0):
+    """
+    Create a colormap that fades from fully transparent to solid cluster color
+    with a nonlinear alpha curve (gamma > 1 = slower fade-in).
+    """
+    rgb = mcolors.to_rgb(hex_color)
+    colors = []
+
+    for i in range(n_levels):
+        frac = i / (n_levels - 1)
+        alpha = frac ** gamma  # nonlinear: fades in slowly
+        colors.append((*rgb, alpha))
+    
+    return mcolors.ListedColormap(colors)
+
+
+
+# Set up the plot
+plt.figure(figsize=(12, 10))
+
+# Reset index to align with embedding
+reset_filtered_df = filtered_df.reset_index(drop=True)
+cluster_cycle = [0, 1, 2]
+center_points = []
+
+# KDE grid resolution
+grid_j = 100
+
+for cluster_num in cluster_cycle:
+    cluster_df = reset_filtered_df[reset_filtered_df['cluster_num'] == cluster_num]
+    cluster_indices = cluster_df.index
+    embedding_cluster = embedding[cluster_indices]
+
+    # Get x and y
+    x = embedding_cluster[:, 0]
+    y = embedding_cluster[:, 1]
+    color = color_mapping[cluster_num]
+
+    # Plot the scatter points
+    plt.scatter(x, y, c=color, s=12, edgecolor=color, alpha=0.1, label=f'Cluster {cluster_num}')
+
+for cluster_num in cluster_cycle:
+    cluster_df = reset_filtered_df[reset_filtered_df['cluster_num'] == cluster_num]
+    cluster_indices = cluster_df.index
+    embedding_cluster = embedding[cluster_indices]
+
+    # Get x and y
+    x = embedding_cluster[:, 0]
+    y = embedding_cluster[:, 1]
+    color = color_mapping[cluster_num]
+    # KDE
+    kde = gaussian_kde(np.vstack([x, y]))
+
+    xmin, xmax = x.min(), x.max()
+    ymin, ymax = y.min(), y.max()
+
+    xx, yy = np.mgrid[xmin:xmax:grid_j*1j, ymin:ymax:grid_j*1j]
+    positions = np.vstack([xx.ravel(), yy.ravel()])
+    density = kde(positions).reshape(xx.shape)
+    
+    #cmap = transparent_cmap(color_mapping[cluster_num])
+    #plt.contourf(xx, yy, density, levels=80, cmap=cmap)
+    
+    cmap = nonlinear_alpha_cmap(color_mapping[cluster_num], gamma=3.0)  # Try gamma = 3 to 5
+    plt.contourf(xx, yy, density, levels=200, cmap=cmap)
+    
+    #plt.contour(xx, yy, density, levels=10, colors=[color], linewidths=1)
+    
+    # Find center
+    max_idx = np.unravel_index(np.argmax(density), density.shape)
+    x_center = xx[max_idx]
+    y_center = yy[max_idx]
+    center_points.append([x_center, y_center])
+    
+    # Plot red center dot
+    plt.plot(x_center, y_center, 'ro', markersize=10, markeredgecolor='k')
+
+    #plt.plot(x_center, y_center, 'ro', markersize=10, markeredgecolor='k', label='Density Peak')
+    
+import matplotlib.lines as mlines
+
+# Create circle marker legend handles with solid color
+legend_handles = []
+for cluster_num in cluster_cycle:
+    color = color_mapping[cluster_num]
+    handle = mlines.Line2D([], [], color=color, marker='o', linestyle='None',
+                           markersize=10, label=f'Cluster {cluster_num+1}')
+    legend_handles.append(handle)
+
+# Optional: Add red circle for density peak
+peak_handle = mlines.Line2D([], [], color='red', marker='o', linestyle='None',
+                            markersize=10, label='Density Peaks')
+legend_handles.append(peak_handle)
+
+plt.legend(handles=legend_handles)
+
+
+# Final touches
+plt.title('UMAP with KDE Density and Cluster Centers')
+plt.xlabel('UMAP 1')
+plt.ylabel('UMAP 2')
+#plt.legend()
+plt.tight_layout()
+plt.savefig("/home/natasha/Desktop/final_figures/umap_kde_clusters.svg", format="svg")  # Save before show
+plt.savefig("/home/natasha/Desktop/final_figures/umap_kde_clusters.png", format="png")  # Save before show
+plt.show()
+
+
+# %%
+
+
 #### PLOTTING PROTOTYPICAL WAVEOFORM (BASED ON KDE CENTER) FOR EACH CLUSTER
 plt.figure(figsize=(10, 7))
 
@@ -601,15 +726,18 @@ for i, wf in enumerate(prototypical_waveforms):
     
     plt.plot(segment, color=color, 
              linewidth = 3.5,
-             label=f'Cluster {cluster_id}')
+             label=f'Cluster {cluster_id+1}')
 
 plt.title('Prototypical Segments by Cluster')
 plt.xlabel('Time (ms)')
 plt.ylabel('Norm. Amplitude')
+plt.legend()
+plt.savefig("/home/natasha/Desktop/final_figures/prototypical_waveform.svg", format="svg")  # Save before show
+plt.savefig("/home/natasha/Desktop/final_figures/prototypical_waveform.png", format="png")  # Save before show
 plt.show()
 
 
-
+# %%
 
 # Create the scatter plot
 plt.figure(figsize=(10, 8))
@@ -724,7 +852,7 @@ plt.close()
 
 
 
-plot_data = features_expanded[["cluster_num", "pca_0", "pca_1"]]
+plot_data = features_expanded[["cluster_num", "pca_0", "pca_1", "duration"]]
 
 
 # Calculate Euclidean norm of [pca_0, pca_1]
@@ -734,7 +862,7 @@ plot_data['pca_magnitude'] = np.linalg.norm(plot_data[['pca_0', 'pca_1']].values
 plot_data = plot_data.sort_values(by=["cluster_num", "pca_magnitude"])
 
 # Drop helper column before plotting
-plot_data = plot_data[["cluster_num", "pca_0", "pca_1"]]
+plot_data = plot_data[["cluster_num", "pca_0", "pca_1", "duration"]]
 
 
 plt.figure(figsize=(12, 8))
@@ -766,7 +894,8 @@ wide_plot_data["pca_0_a"] = plot_data["pca_0"]
 wide_plot_data["pca_0_b"] = plot_data["pca_0"]
 wide_plot_data["pca_1_a"] = plot_data["pca_1"]
 wide_plot_data["pca_1_b"] = plot_data["pca_1"]
-
+wide_plot_data["duration_a"] = plot_data["duration"]
+wide_plot_data["duration_b"] = plot_data["duration"]
 # Heatmap 1: Show only cluster_num column
 data1 = wide_plot_data.copy()
 for col in data1.columns:
@@ -787,15 +916,107 @@ sns.heatmap(data2, cmap='viridis', vmax=3,
             cbar=True, yticklabels=False, linewidths=0, linecolor='none', 
             rasterized=True)
 
+
+
 # Adjust labels manually
-ax.set_xticks([0.5, 2, 4])  # indexes of columns: cluster_num, pca_0_a, pca_1_a
-ax.set_xticklabels(["Cluster", "PC0", "PC1"], fontsize=22)
-#ax.set_yticklabels(ax.get_yticklabels(), fontsize=14)
-#plt.xlabel("Features", fontsize=16)
-#plt.ylabel("MTM clusters", fontsize=16)
+ax.set_xticks([0.5, 2, 4, 6])  # indexes of columns: cluster_num, pca_0_a, pca_1_a
+ax.set_xticklabels(["Cluster", "PC1", "PC2", "Duration"], fontsize=16) # adding + 1 to PC number as if I am indexing from 1 for reader clarity
+ax.set_yticklabels(ax.get_yticklabels(), fontsize=14)
+plt.xlabel("Features", fontsize=16)
+plt.ylabel("MTM clusters", fontsize=16)
+plt.tight_layout()
+
+plt.savefig("/home/natasha/Desktop/final_figures/heatmap_pc0_pc1.svg", format="svg")  # Save before show
+plt.savefig("/home/natasha/Desktop/final_figures/heatmap_pc0_pc1.png", format="png")  # Save before show
+plt.show()
+
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Your cluster color mapping
+color_mapping = ['#4285F4','#88498F','#0CBABA']
+cluster_order = sorted(plot_data["cluster_num"].unique())
+lut = dict(zip(cluster_order, color_mapping))
+
+# Variables to plot
+y_vars = ["pca_0", "pca_1", "duration"]
+
+# Create stacked subplots
+fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(8, 12), sharex=True)
+
+for ax, y in zip(axes, y_vars):
+    sns.boxplot(
+        data=plot_data,
+        x="cluster_num",
+        y=y,
+        ax=ax,
+        boxprops=dict(facecolor="white", edgecolor="black"),
+        medianprops=dict(color="black"),
+        whiskerprops=dict(color="black"),
+        capprops=dict(color="black"),
+        flierprops=dict(marker='o', markersize=3, markerfacecolor='gray', alpha=0.3),
+    )
+
+    # Set box edge colors using cluster colors
+    for i, artist in enumerate(ax.artists):
+        cluster = cluster_order[i]
+        edgecolor = lut[cluster]
+        artist.set_edgecolor(edgecolor)
+        artist.set_linewidth(2)
+
+    ax.set_title(f'{y} by Cluster', fontsize=12)
+    ax.set_xlabel("")  # Remove x-axis label for cleanliness
+
+axes[-1].set_xlabel("Cluster")
 plt.tight_layout()
 plt.show()
 
+
+
+
+
+# Ensure cluster order is sorted to match color order
+cluster_order = sorted(plot_data["cluster_num"].unique())
+
+plt.figure(figsize=(10, 8))
+ax = sns.boxplot(
+    data=plot_data,
+    x="cluster_num",
+    y="pca_0",
+    order=cluster_order,  # important for correct color matching
+    boxprops=dict(facecolor="white", edgecolor="black"),
+    medianprops=dict(color="black"),
+    whiskerprops=dict(color="black"),
+    capprops=dict(color="black"),
+    flierprops=dict(marker='o', markersize=3, markerfacecolor='gray', alpha=0.3),
+)
+
+# Manually set edge color for each box (artist)
+for i, artist in enumerate(ax.artists):
+    edgecolor = color_mapping[i]
+    artist.set_edgecolor(edgecolor)
+    artist.set_linewidth(2.5)
+
+
+
+# Manually add significance bars
+y_max = plot_data["pca_0"].max()
+offset = 0.6
+height = 0.3
+
+# Define pairs and bar positions
+pairs = [(0,1), (1,2), (0,2)]
+for i, (x1, x2) in enumerate(pairs):
+    y = y_max + i * height
+    ax.plot([x1, x1, x2, x2], [y, y + offset, y + offset, y], lw=1.5, c='black')
+    ax.text((x1 + x2) / 2, y + offset + 0.05, "***", ha='center', va='bottom')
+
+
+plt.tight_layout()
+plt.savefig("/home/natasha/Desktop/final_figures/boxplot_pc0.svg", format="svg")  # Save before show
+plt.savefig("/home/natasha/Desktop/final_figures/boxplot_pc0.png", format="png")  # Save before show
+plt.show()
 
 # ==============================================================================
 # Heatmap of waveforms
@@ -877,12 +1098,36 @@ features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
 pca_for_clustermap = features_expanded[['pca_0', 'pca_1', 'cluster_num']]
 
 plt.figure(figsize=(12, 8))
+'''
+#DATA TOO MUCH TO PLOT EVERYTHING - BREAKS + RESTARTS KERNEL
 clust_label = pca_for_clustermap.pop("cluster_num")
 lut = dict(zip(clust_label.unique(), color_mapping))
 row_colors = clust_label.map(lut)
 sns.clustermap(pca_for_clustermap, row_colors=row_colors, cmap="mako")
 plt.show()
 plt.close()
+'''
+
+
+# Sample 500 rows
+pca_sampled = pca_for_clustermap.sample(n=500, random_state=42)
+
+# Extract cluster labels from the *original* DataFrame
+clust_label = df.loc[pca_sampled.index, "cluster_num"]
+
+# Define color lookup table (LUT)
+color_mapping = ['#4285F4','#88498F','#0CBABA']
+lut = dict(zip(sorted(clust_label.unique()), color_mapping))
+
+# Map colors to cluster labels
+row_colors_sampled = clust_label.map(lut)
+
+# Make the clustermap
+sns.clustermap(pca_sampled, row_colors=row_colors_sampled, cmap="mako")
+
+
+
+
 
 # ==============================================================================
 # Scatter plot of PCA0 by PCA1 - colors by cluster
@@ -959,7 +1204,7 @@ for feature, p_values in feature_dict.items():
     plt.show()
 
 
-
+'''
 # ANOVA and Tukey HSD post-hoc
 # I think the data is not always normal - so not as good of a test
 for feature in feature_names:
@@ -982,7 +1227,7 @@ for feature in feature_names:
         print("significant but small effect size")
     print("\n")
 
-
+'''
 
 
 # KRUSKAL WALLIS WITH DUNN'S POST-HOC: FOR NON-NORMAL DATA
@@ -1002,7 +1247,7 @@ for feature in feature_names:
     print(f'{h_stat:.2f}, {p_value:.4f}, {eta_squared:.4f}\n')
     
     if p_value < 0.05 :
-        if eta_squared > 0.06:  # Only proceed if Kruskal-Wallis is significant
+        if eta_squared > 0.04:  # Only proceed if Kruskal-Wallis is significant
             print(f"{feature} p-value: {p_value}")
             print(f"H-stat {h_stat.round(3)}, effect size: {eta_squared.round(4)}")
             
@@ -1011,7 +1256,7 @@ for feature in feature_names:
             print(dunn_results)
 
         elif eta_squared > 0.01:
-            print(f'{feature} is signficiant ({p_value}) but small effect size ({eta_squared.round(4)})')
+            print(f'{feature} is signficiant ({p_value}) but weak effect size ({eta_squared.round(4)})')
         else:
             print(f'{feature} is signficiant ({p_value}) but inconsequential effect size')
     else:

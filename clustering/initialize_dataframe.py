@@ -27,12 +27,18 @@ df = df.rename(columns={'taste': 'taste_num'})
 df = df.rename(columns={'trial': 'trial_num'})
 df['basename'] = df['basename'].str.lower() # All basenames to lowercase
 
+# Make sure each basename has an associated session index
+basename_to_index = {name: i for i, name in enumerate(df['basename'].unique())}
+df['session_ind'] = df['basename'].map(basename_to_index)
+
+df.event_type = df.event_type.replace('mouth or tongue movement', 'MTMs')
 
 df = df[["features", "segment_raw", "segment_norm_interp", 
          "segment_bounds", "taste_num", "trial_num", 
          "basename", "animal_num", "taste_name", 
          "raw_features", "event_type", "session_ind", 
-         "multimodal"]] # Keep only needed columns
+         "multimodal", "laser_duration_ms", "laser_lag_ms",
+         "laser"]] # Keep only needed columns
 
 df.reset_index(drop=True, inplace=True)
 
