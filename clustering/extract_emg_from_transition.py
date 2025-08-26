@@ -24,6 +24,7 @@ import piecewise_regression
 from scipy.stats import ttest_rel
 import scipy.stats as stats
 from tqdm import tqdm
+import matplotlib.gridspec as gridspec
 
 # ==============================================================================
 # Load data and get setup
@@ -144,7 +145,7 @@ for item in os.listdir(emg_dir):
         shutil.rmtree(item_path)
         
 # =============================================================================
-
+# Actually plot
 # =============================================================================
 
 # Group by basename (session), taste, and trial
@@ -381,7 +382,7 @@ for (basename, taste_name), taste_group in tqdm(grouped):
 # Raster plot of events around the transition, 1 plot per session per taste
 # ==============================================================================
 
-desired_clust_to_plot = 1 # which cluster_num to plot?
+desired_clust_to_plot = 2 # which cluster_num to plot?
 
 # Clear and create folder directory
 single_clust_dir = os.path.join(dirname, 'single_cluster_raster_transition')
@@ -434,7 +435,70 @@ for (basename, taste), taste_group in grouped:
 
 
 
+# %% WHY ISN'T THIS WORKING
+# ==============================================================================
+# WHY ISN'T THIS WORKING
+# ==============================================================================
 
+
+for (basename, taste), taste_group in grouped:
+    if basename == 'nm43_2500ms_160515_104159':
+        transition_time_point = fixed_transition_time
+        behaviors_to_plot_this_round = taste_group[taste_group['cluster_num'] == desired_clust_to_plot]
+        behaviors_to_plot_this_round = behaviors_to_plot_this_round[behaviors_to_plot_this_round['taste_name'] == 'suc']
+        behaviors_to_plot_this_round = behaviors_to_plot_this_round.drop_duplicates(subset=['segment_bounds'])
+        
+        
+        fig = plt.figure(figsize=(10, 10))
+        gs = gridspec.GridSpec(2, 1, height_ratios=[1, 3], hspace=0.05)
+
+        # =========================
+        # Top panel: raw count frequency
+        # =========================
+        ax_freq = fig.add_subplot(gs[0])
+        time_bins = np.linspace(-window_len, window_len, 1000)
+        freq_trace = np.zeros_like(time_bins, dtype=float)
+        
+        for _, row in behaviors_to_plot_this_round.iterrows():
+            segment_bounds = row['segment_bounds']
+            start = segment_bounds[0] - transition_time_point
+            end = segment_bounds[1] - transition_time_point
+
+            # Add 1 to all bins where the behavior is active
+            freq_trace += ((time_bins >= start) & (time_bins <= end)).astype(float)
+
+        # Step plot for exact counts
+        ax_freq.step(time_bins, freq_trace, color='black', linewidth=2, where='mid')
+        ax_freq.axvline(0, color='k', linestyle='--')
+        ax_freq.set_xlim([-window_len, window_len])
+        ax_freq.set_ylim([0, 15])
+        ax_freq.set_ylabel('Frequency')
+        ax_freq.set_xticklabels([])  # hide x-axis labels
+        ax_freq.set_title(f"Taste: {convert_taste_num_to_name(basename, taste, df)}")
+
+
+        # =========================
+        # Bottom panel: raster plot
+        # =========================
+        ax_raster = fig.add_subplot(gs[1])
+
+        for _, row in behaviors_to_plot_this_round.iterrows():
+            trial_num = row['trial_num']
+            segment_bounds = row['segment_bounds']
+            start = segment_bounds[0] - transition_time_point
+            end = segment_bounds[1] - transition_time_point
+            
+            ax_raster.hlines(y=trial_num, xmin=start, xmax=end,
+                             color=color_mapping.get(desired_clust_to_plot, 'black'), linewidth=8)
+            print(end-start)
+        ax_raster.set_xlim([-window_len, window_len])
+        ax_raster.axvline(0, color='k', linestyle='--')
+        ax_raster.set_ylabel('Trial')
+        ax_raster.set_xlabel('Time (ms)')
+
+        plt.suptitle(f'{basename}')
+
+        plt.show()
 
 
 # %% # BEFORE/AFTER TRANSITION COUNT WITH STATS TESTS
@@ -667,8 +731,13 @@ for _, row in unique_combinations.iterrows():
     after_counts = ttest_df['after'].tolist()
     stat, pval = ttest_rel(before_counts, after_counts)   
     res = stats.poisson_means_test(sum(before_counts), len(before_counts), sum(after_counts), len(after_counts))
-    
+    '''
     if pval < 0.05: 
+        sig_status = 'yes'
+    else:
+        sig_status = 'no'
+    '''
+    if res.pvalue < 0.05: 
         sig_status = 'yes'
     else:
         sig_status = 'no'
@@ -706,47 +775,24 @@ for _,row in session_trial_results_df.iterrows():
         print(f'{basename}: {taste} and cluster {cluster_num}')
 
 
-
+## PLOT: VIOLIN PLOT BY SESSION OF BEFORE vs AFTER COUNTS
 output_dir = os.path.join(dirname, 'session_analysis')
 os.makedirs(output_dir, exist_ok=True)
 
 unique_basenames = count_df['basename'].unique()
 
-for basename in unique_basenames:
-    subset = count_df[count_df['basename'] == basename]
-    
-    g = sns.FacetGrid(subset, col='taste_name', row='cluster_num', margin_titles=True, sharey=False)
-    g.map_dataframe(
-        sns.boxplot,
-        x='event_position',
-        y='movement_count',
-        hue='event_position',
-        palette='pastel',
-        legend=False
-    )
-    
-    g.fig.suptitle(f'Basename: {basename}', y=1.02)
-    safe_basename = basename.replace('/', '_')  # just in case there's a slash
-    filepath = os.path.join(output_dir, f"{safe_basename}_stripplot.png")
-    g.savefig(filepath)
-    plt.close(g.fig)
-    
-
- 
-## PLOTS FOR ABU
 
 for basename in unique_basenames:
     subset = count_df[count_df['basename'] == basename]
     
     stripplot_grid = sns.FacetGrid(subset, col='taste_name', row='cluster_num', margin_titles=True, sharey=False)
     stripplot_grid.map_dataframe(
-        sns.stripplot,
+        sns.violinplot,
         x='event_position',
         y='movement_count',
         hue='event_position',
         palette='pastel',
-        legend=False,
-        s=10
+        legend=False
     )
     
     for (row_val, col_val), ax in stripplot_grid.axes_dict.items():
@@ -760,7 +806,7 @@ for basename in unique_basenames:
             (session_trial_results_df['cluster_num'] == row_val) &
             (session_trial_results_df['taste'] == col_val) &
             (session_trial_results_df['basename'] == basename_val)
-        ]['ttest_pvalue'].iloc[0]
+        ]['poisson_pvalue'].iloc[0]
         n = subsub['trial'].nunique() if 'trial' in subsub.columns else len(subsub)
 
         label = f"p = {pval:.2g}\nn = {n}"
@@ -771,43 +817,135 @@ for basename in unique_basenames:
             fontsize=8,
             bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='gray', alpha=0.7)
         )
-    
+
     stripplot_grid.fig.suptitle(f'Basename: {basename}', y=1.02)
     safe_basename = basename.replace('/', '_')
     filepath = os.path.join(output_dir, f"{safe_basename}_stripplot.png")
     stripplot_grid.savefig(filepath)
     plt.close(stripplot_grid.fig)
 
-# KDE plot - overall
+basename_to_plot = 'nb34_test3_4tastes_240209_123329'
+for basename in unique_basenames:
+    if basename == basename_to_plot:
+        subset = count_df[count_df['basename'] == basename]
+        
+        stripplot_grid = sns.FacetGrid(subset, col='taste_name', row='cluster_num', margin_titles=True, sharey=False)
+        stripplot_grid.map_dataframe(
+            sns.violinplot,
+            x='event_position',
+            y='movement_count',
+            hue='event_position',
+            palette='pastel',
+            legend=False
+        )
+        
+        for (row_val, col_val), ax in stripplot_grid.axes_dict.items():
+            subsub = subset[
+                (subset['cluster_num'] == row_val) &
+                (subset['taste_name'] == col_val)
+            ]
+            
+            basename_val = subset['basename'].iloc[0]
+            pval = session_trial_results_df[
+                (session_trial_results_df['cluster_num'] == row_val) &
+                (session_trial_results_df['taste'] == col_val) &
+                (session_trial_results_df['basename'] == basename_val)
+            ]['poisson_pvalue'].iloc[0]
+            n = subsub['trial'].nunique() if 'trial' in subsub.columns else len(subsub)
+    
+            label = f"p = {pval:.2g}\nn = {n}"
+            ax.text(
+                0.05, 0.95, label,
+                transform=ax.transAxes,
+                ha='left', va='top',
+                fontsize=8,
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='gray', alpha=0.7)
+            )
+        for ax in stripplot_grid.axes.flat:
+            ax.set_ylim(-0.75, 8)
+        stripplot_grid.fig.suptitle(f'Basename: {basename}', y=1.02)
+        safe_basename = basename.replace('/', '_')
+        plt.savefig(f"/home/natasha/Desktop/final_figures/{safe_basename}_violinplot.svg", format="svg")
+        plt.savefig(f"/home/natasha/Desktop/final_figures/{safe_basename}_violinplot.png", format="png")
+        plt.show()
+    
+
+
+
+'''
+# PLOT: KDE plot - overall
 kde_overall = sns.displot(data=session_trial_results_df, x="poisson_pvalue")
 kde_overall.fig.suptitle("Distribution of All T-test P-values", y=0.98)
 kde_overall.fig.tight_layout()
 kde_overall.fig.savefig(os.path.join(output_dir, "ttest_kde_overall.png"))
 plt.show()
+'''
 
 
+## PLOT: P-VALUE DISTRIBUTION WITH RANDOMIZED DATA
+# Parameters
+n_values = 475 #MAKE THIS NOT FLEXIBLE - USE ACTUAL DATA FROM DATAFRAME
+n_reps = 50
+binwidth = 0.05
+bins = np.arange(0, 1 + binwidth, binwidth)
+bin_centers = bins[:-1] + binwidth / 2
 
-kde_overall = sns.displot(
+# Generate random uniform(0,1) data
+random_data = np.random.uniform(0, 1, size=(n_reps, n_values))
+
+# Histogram counts for each repetition
+counts_per_rep = np.array([np.histogram(rep, bins=bins)[0] for rep in random_data])
+
+# Mean and SE across reps
+mean_counts = counts_per_rep.mean(axis=0)
+se_counts = counts_per_rep.std(axis=0, ddof=1) / np.sqrt(n_reps)
+
+# Plot real data histogram
+plt.figure(figsize=(10, 8))
+sns.histplot(
     data=session_trial_results_df,
     x="poisson_pvalue",
-    binwidth=0.05,
-    height=10,
-    aspect=1 
+    binwidth=binwidth,
+    color="steelblue",
+    alpha=0.7,
+    label="Real Data"
 )
 
-# Add horizontal line at y=20
-for ax in kde_overall.axes.flat:
-    ax.axhline(y=5.6, color='red', linestyle='--',linewidth=7)
+# Overlay mean null distribution as pink bars
+plt.bar(
+    bin_centers,
+    mean_counts,
+    width=binwidth * 0.9,
+    color="pink",
+    alpha=0.5,
+    label="Random Mean (±SE)"
+)
+# Add error bars for SE
+plt.errorbar(
+    bin_centers,
+    mean_counts,
+    yerr=se_counts,
+    fmt='none',
+    ecolor="black",
+    elinewidth=2,
+    alpha=0.8
+)
 
-kde_overall.fig.suptitle("Distribution of All Poisson P-values", y=0.98)
-kde_overall.fig.tight_layout()
-kde_overall.fig.savefig(os.path.join(output_dir, "ttest_kde_overall.png"))
+plt.title("Distribution of All Poisson P-values", y=1.02)
+plt.xlabel("Poisson P-value")
+plt.ylabel("Count")
+plt.legend()
+plt.tight_layout()
+plt.xlim(0, 1)
+plt.savefig(os.path.join(output_dir, "poisson_pval_dist.png"))
+plt.savefig("/home/natasha/Desktop/final_figures/poisson_pval_dist.svg", format="svg")
+plt.savefig("/home/natasha/Desktop/final_figures/poisson_pval_dist.png", format="png")
 plt.show()
 
-plt.close(kde_overall.fig)
 
 
-# bar plot showing proportion of significant p values vs chance
+
+## PLOT: Single bar plot showing proportion of significant p values vs chance
 sig_proportion = (session_trial_results_df['poisson_pvalue'] < 0.05).sum()/len(session_trial_results_df)
 
 plt.figure(figsize=(6, 20))
@@ -832,17 +970,22 @@ plt.errorbar(
 plt.show()
 plt.clf()
 
+
+## PLOT: KDE plots by test with p-value distribution
 from scipy.stats import chisquare
 
 # 1. Define bin edges for histogram
 bins = np.arange(0, 1.05, 0.05)  # from 0 to 1, in 0.05 steps
-
+bins = np.logspace(-1.5, 0, num= 10)
 # 2. Bin your p-values
 observed_counts, _ = np.histogram(session_trial_results_df["poisson_pvalue"], bins=bins)
+expected_counts, _ = np.histogram(random_data, bins=bins)
+
+# CHECK THAT RANDOM DATA IS FLAT (IN LINEAR SPACE) TODO
 
 # 3. Define expected counts under uniform distribution
-expected_count = len(session_trial_results_df["poisson_pvalue"]) / len(observed_counts)
-expected_counts = np.full_like(observed_counts, fill_value=expected_count, dtype=float)
+#expected_count = len(session_trial_results_df["poisson_pvalue"]) / len(observed_counts)
+#expected_counts = np.full_like(observed_counts, fill_value=expected_count, dtype=float)
 
 # 4. Run chi-squared goodness-of-fit test
 chi2_stat, p_val = chisquare(f_obs=observed_counts, f_exp=expected_counts)
@@ -855,8 +998,7 @@ if p_val < 0.05:
 else:
     print("The p-value distribution does not significantly deviate from uniformity.")
 
-
-# KDE plot - by taste
+# actually plot
 kde_by_taste = sns.displot(
     data=session_trial_results_df,
     x="poisson_pvalue",
@@ -869,21 +1011,21 @@ kde_by_taste = sns.displot(
 kde_by_taste.fig.savefig(os.path.join(output_dir, "ttest_kde_by_taste.png"))
 plt.close(kde_by_taste.fig)
 
-# Scatter plot
+## PLOT: Poisson pvalue vs trial number
 plt.figure()
 plt.scatter(
-    x=session_trial_results_df['ttest_pvalue'],
+    x=session_trial_results_df['poisson_pvalue'],
     y=session_trial_results_df['n_trials']
 )
 plt.xlabel("T-test pvalues")
 plt.ylabel("Trial Number")
 plt.tight_layout()
 plt.savefig(os.path.join(output_dir, "pval_vs_trials_scatter.png"))
-plt.close()
+plt.show()
 
 
-
-
+## PLOT: P-VALUE DISTRIBUTION WITH RANDOMIZED DATA
+taste_order = ['qhcl', 'quind', 'ca', 'suc', 'nacl', 'water']  # change as needed
 # Step 1: compute both proportion of "yes" and total count
 grouped = (
     session_trial_results_df
@@ -899,13 +1041,16 @@ summary_df = grouped.agg([
 summary_df['proportion_sig'] = summary_df['num_sig'] / summary_df['total']
 
 # Step 2: pivot the proportion matrix (for coloring)
-proportion_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='proportion_sig')
+#proportion_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='proportion_sig')
+proportion_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='proportion_sig')[taste_order]
 
 # Step 3: create annotations like "0.67 (3)"
 summary_df['annot'] = summary_df.apply(
     lambda row: f"{row['proportion_sig']:.2f}\n(N={int(row['total'])})", axis=1
 )
-annot_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='annot')
+#annot_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='annot')
+annot_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='annot')[taste_order]
+
 
 # Step 4: plot the heatmap
 plt.figure(figsize=(10, 6))
@@ -913,15 +1058,19 @@ sns.heatmap(
     proportion_matrix,
     annot=annot_matrix,
     fmt='',  # Since annotations are strings
-    cmap='coolwarm',
+    cmap='inferno',
     vmin=0,
     vmax=1,
-    cbar_kws={'label': 'Proportion Significant'}
+    cbar_kws={'label': 'Proportion Significant'},
+    linewidths=1,       # Thickness of the lines
+    linecolor='white'   # Color of the lines
 )
-plt.title("Proportion of Significant Results (Paired T-Test)")
+plt.title("Proportion of Significant Results (Poisson)")
 plt.xlabel("Taste")
 plt.ylabel("Cluster Number")
 plt.tight_layout()
+plt.savefig("/home/natasha/Desktop/final_figures/pval_cluster_taste_matrix.svg", format="svg")
+plt.savefig("/home/natasha/Desktop/final_figures/pval_cluster_taste_matrix.png", format="png")
 plt.show()
 
 

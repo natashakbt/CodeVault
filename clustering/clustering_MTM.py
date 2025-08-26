@@ -19,6 +19,8 @@ from scipy import stats
 from sklearn.cluster import KMeans
 import piecewise_regression
 from scipy.spatial.distance import mahalanobis
+from tqdm import tqdm
+import seaborn as sns
 
 # ==============================================================================
 # Load data and get setup
@@ -135,7 +137,7 @@ def calc_mahalanobis_distance_matrix(mtm_session_df):
 # ==============================================================================
 fixed_cluster_num = np.nan
 #fixed_cluster_num = 3
-iterations = 1# Number of times to repeat UMAP reduction #50 for randomization
+iterations = 50# Number of times to repeat UMAP reduction #50 for randomization
 
 
 
@@ -183,7 +185,7 @@ else:
 #    cmap = 'inferno'
 
 # PCA with GMM on a session-by-session basis
-for session in df.session_ind.unique():
+for session in tqdm(df.session_ind.unique()):
     #if session == 0:
     #    continue
     for i in range(iterations):
@@ -249,6 +251,7 @@ for session in df.session_ind.unique():
         # Extract non-diagonal elements
         diag_elements.extend(np.diagonal(mahal_matrix).tolist())
         # For speed, only create individual session plots for the first iteration
+        '''
         if i == 0:
             
             # Plot the UMAP projections with optimal GMM clusters, using the custom colormap
@@ -293,36 +296,90 @@ for session in df.session_ind.unique():
             mahal_session_path_svg = os.path.join(mahal_dir, f'session_{session}_mahalanobis.svg')
             plt.savefig(mahal_session_path_svg)
             plt.clf()
-      
+      '''
+
+# %%
+# ==============================================================================
+# MAHALANOBIS DISTANCE + stats
+# ==============================================================================      
+    
 ## Histogram of mahalanobis diagonal vs non-diag values
 bin_edges = np.linspace(min(mahal_matrix.flatten()), max(mahal_matrix.flatten()), num=31)  # 20 bins
 
 plt.hist(diag_elements, bins=bin_edges, 
-         color='cornflowerblue', 
+         color='gray', 
          edgecolor='black', 
-         alpha=0.7,  # Transparency for the first histogram
+         alpha=1,  # Transparency for the first histogram
          label='Diagonal Elements')  # Add a label
 
 plt.hist(non_diag_elements, bins=bin_edges, 
-         color='salmon', 
+         color='pink', 
          edgecolor='black', 
-         alpha=0.7,  # Transparency for the second histogram
-         label='Non-Diagonal Elements')  # Add a label
+         alpha=0.5, 
+         label='Non-Diagonal Elements')
 
 plt.xlabel('Values')
 plt.ylabel('Frequency')
 plt.title(f'Frequency Distribution ({iterations} iterations)')
 plt.legend()  # Show the legend for clarity
+png_mah_plot = os.path.join(clust_dir, 'diagonal_freq_dist.png')
+svg_mah_plot = os.path.join(clust_dir, 'diagonal_freq_dist.svg')
+plt.savefig(png_mah_plot)
+plt.savefig(svg_mah_plot)
 plt.show()
 
+ks_stats = stats.kstest(diag_elements, non_diag_elements)
+if ks_stats.pvalue < 0.05:
+    print("diagonal distances statistically different from non-diagonal")
+    print(f'pvalue: {ks_stats.pvalue}, KS Statistic (D): {ks_stats.statistic}')
+else:
+    print("Warning: diagonal distances NOT statistically different from non-diagonal")
+# Data to save
+mahal_data = {
+    'diag_elements': diag_elements,
+    'non_diag_elements': non_diag_elements
+}
 
-## Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
+if fixed_cluster_num == 3:
+    # Data to save
+    mahal_data = {
+        'diag_elements': diag_elements,
+        'non_diag_elements': non_diag_elements
+    }
+
+
+    output_file_path = os.path.join(dirname, 'mahalanobis_data.pkl')
+    df.to_pickle(output_file_path)
+    
+    print(f"Mahalanobis dataFrame successfully saved to {output_file_path}")
+    
+    ks_stats = stats.kstest(diag_elements, non_diag_elements)
+    if ks_stats.pvalue < 0.05:
+        print("diagonal distances statistically different from non-diagonal")
+        print(f'pvalue: {ks_stats.pvalue}, KS Statistic (D): {ks_stats.statistic}')
+    else:
+        print("Warning: diagonal distances NOT statistically different from non-diagonal")
+
+
+
+# %% Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
+# ==============================================================================
+# Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
+# ==============================================================================
+
 # Define jitter amount
 jitter_strength = 0.05  # Adjust the strength of jitter as needed
 
 # Add jitter to the session size and optimal clusters
 session_size_jittered = np.array(session_size_list) + np.random.normal(0, jitter_strength, len(session_size_list))
 optimal_cluster_jittered = np.array(optimal_cluster_list) + np.random.normal(0, jitter_strength, len(optimal_cluster_list))
+
+snslmplot_df = pd.DataFrame(
+    [[session_size_jittered, optimal_cluster_list]],
+    columns = ['size','cluster']
+    )
+snslmplot_df['session_size'] = session_size_jittered
+snslmplot_df = pd.DataFrame({'size': session_size_jittered, 'cluster': optimal_cluster_list})
 
 # Make scatter plot
 plt.scatter(session_size_jittered, optimal_cluster_list, c='cornflowerblue', marker='o')
@@ -332,7 +389,14 @@ plt.title(f'Optimal Cluster Number vs Session Size ({iterations} iterations)')
 scatter_plot_path = os.path.join(pca_dir, 'optimal_clusters_vs_session_size.png')
 plt.savefig(scatter_plot_path)
 plt.show()
-    
+
+sns.lmplot(data = snslmplot_df, x='size', y='cluster', robust=True)
+sns.lmpl
+from scipy.stats import spearmanr
+
+rho, p_val = spearmanr(session_size_list, optimal_cluster_list)
+print(f"Spearman rho = {rho:.3f}, p = {p_val:.4f}")
+
 ## Histogram of ditribution of optimal cluster sizes across all iterations
 mode_result = stats.mode(optimal_cluster_list, keepdims=False)
 print(f"The mode is: {mode_result[0]}")
@@ -351,8 +415,12 @@ plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
 histogram_path = os.path.join(pca_dir, 'optimal_clusters_histogram.png')
 plt.savefig(histogram_path)
 plt.show()
-    
-import seaborn as sns
+
+# %%
+# ==============================================================================
+# 
+# ==============================================================================
+
 # Create KDE plot
 plt.figure(figsize=(8, 5))
 sns.kdeplot(optimal_cluster_list, 

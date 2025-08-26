@@ -28,39 +28,17 @@ from tqdm import tqdm
 from scipy.ndimage import gaussian_filter
 from matplotlib.colors import TwoSlopeNorm
 
+
+# ==============================================================================
+# Load data and get setup
+# ==============================================================================
+
 dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
 df = pd.read_pickle(file_path)
 df = df[~df['laser']]
 
 transition_df = pd.read_pickle(file_path) # Replace with another path if you want to use real transtiion times (something like scaled_mode_tau.pkl)
-
-
-# ==============================================================================
-# Load data and get setup
-# ==============================================================================
-'''
-dirname = '/home/natasha/Desktop/clustering_data/'
-file_path = os.path.join(dirname, 'clustering_df_update.pkl')
-df = pd.read_pickle(file_path)
-
-transition_file_path = os.path.join(dirname, 'scaled_mode_tau_cut.pkl')
-transition_df = pd.read_pickle(transition_file_path)
-
-# Remove any data for df that does not have an associated transition time in scaled_mode_tau
-df['basename'] = df['basename'].str.lower() # All basenames to lowercase
-df = df.rename(columns={'taste': 'taste_num'}) # NEW changed column name.
-df = df.rename(columns={'trial': 'trial_num'}) # NEW changed column name.
-transition_df['basename'] = transition_df['basename'].str.lower() # All basenames to lowercase
-transition_df = transition_df.rename(columns={'taste': 'taste_num'}) # NEW changed column name.
-tau_basenames = transition_df.basename.unique() # Find all basenames in transition_df
-df = df.loc[df['basename'].isin(tau_basenames)] # Keep only basenames 
-# Manually removed this specific data:
-df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste_num'] == 1))]
-df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste_num'] == 4))]
-'''
-
-
 
 
 # ==============================================================================
@@ -264,7 +242,7 @@ for file in files:
 
 
 p_val_dict = {}
-n_iterations = 10
+n_iterations = 10 # Using 10 iterations
 
 unique_sessions = transition_events_df['basename'].unique()
 for n in tqdm(range(n_iterations)):
@@ -295,7 +273,8 @@ for n in tqdm(range(n_iterations)):
                 hue='event_position',
                 kind='kde',
                 height=6,
-                aspect=1
+                aspect=1,
+                palette={'before': '#e66101', 'after': '#5e3c99'}
             )
             g.fig.suptitle(f'{basename}')
             fig_path = os.path.join(fig_dir, f'{basename}_countour_plot.png')
@@ -324,6 +303,8 @@ for n in tqdm(range(n_iterations)):
         
         hresult_flat = h_result[h_mask].flatten()
         actual_stat = np.abs(hresult_flat).sum()
+        
+        '''
         if n == 0:
             # For Abu: Does this plot the difference between after and before?
             plt.clf()
@@ -351,7 +332,7 @@ for n in tqdm(range(n_iterations)):
             plt.title(f'{basename}\nSmoothed Histogram Difference')
             fig_path = os.path.join(fig_dir, f'{basename}_smooth_difference.png')
             plt.savefig(fig_path)
-
+        '''
         # chi2_statistic, p_value = chisquare(
         #     hresult_flat,
         #     f_exp = np.ones(len(hresult_flat)*1e-6)
@@ -410,7 +391,8 @@ plot_df['session'] = pd.factorize(plot_df['basename'])[0]
 
 
 
-#Make basenames more concise for x-axis tick labels
+plot_df['rat'] = plot_df['basename'].str.split('_').str[0]
+
 basename_to_session = {}
 prefix_counts = {}
 
@@ -424,35 +406,22 @@ for basename in plot_df['basename'].unique():
     
 plot_df['session'] = plot_df['basename'].map(basename_to_session)
 
+# Sort so sessions stay in order within each rat
+plot_df = plot_df.sort_values(['rat', 'basename']).reset_index(drop=True)
 
 
-# Define the path to your desktop (works on most systems)
-desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-save_path = os.path.join(desktop_path, "divergence_pvalues_plot.svg")
+# Assign a unique numeric ID to each session
+session_map = {s: i for i, s in enumerate(plot_df['session'].unique(), start=1)}
+plot_df['session_id'] = plot_df['session'].map(session_map)
 
+# %%
 
-# Plot
-plt.figure(figsize=(10, 9))
-sns.stripplot(data=plot_df, x='session', y='divergence_p', 
-              jitter=True, s=10)
-sns.boxplot(data=plot_df, x='session', y='divergence_p', 
-            fill=False, color='black', linewidth=2, width=.5,
-            showfliers=False)
+desktop_path = os.path.expanduser("~/Desktop/clustering_data/UMAP_of_all_MTMs_plot_df.pkl")
 
-plt.axhline(y=0.05, color='red', linestyle='--', 
-            linewidth=4, label='p = 0.05')  
+# Save as pickle
+plot_df.to_pickle(desktop_path)
 
-plt.title("Divergence P-values by Session")
-plt.ylabel("P-value", fontsize=18, labelpad=10)
-plt.ylim(-0.002, 0.08)
-plt.xlabel("Session", fontsize=18, labelpad=10)
-plt.xticks(fontsize=14, rotation=45)
-plt.yticks(fontsize=14)
-
-plt.savefig(save_path, format='svg', bbox_inches='tight')
-plt.show()
-
-
+print(f"Saved plot_df as a pickle file to {desktop_path}")
 
 
 
