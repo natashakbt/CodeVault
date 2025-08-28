@@ -22,6 +22,7 @@ from scipy.spatial.distance import mahalanobis
 from tqdm import tqdm
 import seaborn as sns
 
+
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
@@ -37,6 +38,17 @@ mtm_bool = df.event_type.str.contains('MTMs')
 mtm_df = df.loc[mtm_bool]
 
 
+# ==============================================================================
+# Define and start UMAP process
+# ==============================================================================
+mtm_features = np.stack(mtm_df.features.values)
+
+# UMAP dimmentionality reduction and feature scaling
+reducer = umap.UMAP()
+n_components_range = list(range(1, 15))  # Define a range of cluster numbers to test
+scaled_mtm_features = StandardScaler().fit_transform(mtm_features) # Scale features
+embedding = reducer.fit_transform(scaled_mtm_features) # UMAP embedding
+
 
 # ==============================================================================
 # Prep folder for saving UMAP clustering plots
@@ -50,51 +62,6 @@ for file in png_files:
     os.remove(file)
     
     
-# %%
-# ==============================================================================
-# UMAP of all MTMs in all sessions
-# ==============================================================================
-# Array of every MTM event and their values for each of the 8 features
-mtm_features = np.stack(mtm_df.features.values)
-
-# UMAP dimmentionality reduction and feature scaling
-reducer = umap.UMAP()
-n_components_range = list(range(1, 15))  # Define a range of cluster numbers to test
-scaled_mtm_features = StandardScaler().fit_transform(mtm_features) # Scale features
-embedding = reducer.fit_transform(scaled_mtm_features) # UMAP embedding
-
-# Determine the optimal number of clusters using BIC
-bic_scores = []
-for n_components in n_components_range:
-    gmm = GaussianMixture(n_components=n_components, random_state=42)
-    gmm.fit(embedding)
-    bic = gmm.bic(embedding)
-    bic_scores.append(bic)
-
-# Find the number of components with the lowest BIC
-optimal_n_components = n_components_range[np.argmin(bic_scores)]
-print(f'All sessions: Optimal number of clusters is {optimal_n_components}')
-
-# Fit the GMM with the optimal number of clusters
-optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
-optimal_gmm.fit(embedding)
-labels = optimal_gmm.predict(embedding)
-   
-# Plot the UMAP projections with optimal GMM clusters
-plt.scatter(embedding[:,0], embedding[:,1], c=labels, cmap='viridis', s=5)
-plt.title(f'All Sessions: UMAP projection with GMM ({optimal_n_components} clusters)')
-umap_all_path = os.path.join(clust_dir, 'all_sessions_umap.png')
-plt.savefig(umap_all_path)
-plt.clf()
-
-# Plot BIC values for a range of cluster sizes
-plt.plot(n_components_range, bic_scores, marker='o')
-plt.xlabel('Number of clusters')
-plt.ylabel('BIC')
-plt.title('All Sessions: BIC Scores')
-bic_all_path = os.path.join(clust_dir, 'all_sessions_bic.png')
-plt.savefig(bic_all_path)
-plt.clf()   
 
 
 
@@ -135,8 +102,8 @@ def calc_mahalanobis_distance_matrix(mtm_session_df):
 # ==============================================================================
 # Important inputs for clustering of individual sessions
 # ==============================================================================
-fixed_cluster_num = np.nan
-#fixed_cluster_num = 3
+#fixed_cluster_num = np.nan
+fixed_cluster_num = 3
 iterations = 50# Number of times to repeat UMAP reduction #50 for randomization
 
 
@@ -175,14 +142,13 @@ mtm_df['scaled_features'] = np.nan
 if fixed_cluster_num == 3:
     custom_colors = ['#4285F4', '#88498F', '#0CBABA']
     cmap = ListedColormap(custom_colors)
-#elif fixed_cluster_num == 4:
+
 else:
     custom_colors = ['#4285F4', '#88498F', '#08605F', '#0CBABA',  '#B0B0B0']
     custom_colors = ['#4285F4', '#88498F', '#0CBABA']
 
     cmap = ListedColormap(custom_colors)
-#else:
-#    cmap = 'inferno'
+
 
 # PCA with GMM on a session-by-session basis
 for session in tqdm(df.session_ind.unique()):
@@ -297,12 +263,16 @@ for session in tqdm(df.session_ind.unique()):
             plt.savefig(mahal_session_path_svg)
             plt.clf()
       '''
-
+### TODO:
+    # MAHALANOBIS ONLY WORHT DOING IF FIXED CLUSTER NUM
+    # DISTRIBUTION PLOTS ONLY WORTH DOING IF VARIABLE CLUSTER NUM
+    
 # %%
 # ==============================================================================
 # MAHALANOBIS DISTANCE + stats
 # ==============================================================================      
-    
+
+# TODO: FIGURE OUT HOW TO MOVE PLOTTING CODE INTO mahalanobis_test_script
 ## Histogram of mahalanobis diagonal vs non-diag values
 bin_edges = np.linspace(min(mahal_matrix.flatten()), max(mahal_matrix.flatten()), num=31)  # 20 bins
 
@@ -328,152 +298,36 @@ plt.savefig(png_mah_plot)
 plt.savefig(svg_mah_plot)
 plt.show()
 
-ks_stats = stats.kstest(diag_elements, non_diag_elements)
-if ks_stats.pvalue < 0.05:
-    print("diagonal distances statistically different from non-diagonal")
-    print(f'pvalue: {ks_stats.pvalue}, KS Statistic (D): {ks_stats.statistic}')
-else:
-    print("Warning: diagonal distances NOT statistically different from non-diagonal")
-# Data to save
-mahal_data = {
-    'diag_elements': diag_elements,
-    'non_diag_elements': non_diag_elements
-}
-
 if fixed_cluster_num == 3:
     # Data to save
-    mahal_data = {
-        'diag_elements': diag_elements,
-        'non_diag_elements': non_diag_elements
-    }
-
+    mahal_data = pd.DataFrame({
+        'value': list(diag_elements) + list(non_diag_elements),
+        'group': ['diag'] * len(diag_elements) + ['non_diag'] * len(non_diag_elements)
+    })
 
     output_file_path = os.path.join(dirname, 'mahalanobis_data.pkl')
-    df.to_pickle(output_file_path)
+    mahal_data.to_pickle(output_file_path)
     
-    print(f"Mahalanobis dataFrame successfully saved to {output_file_path}")
+    print(f"Mahalanobis DataFrame successfully saved to {output_file_path}")
     
-    ks_stats = stats.kstest(diag_elements, non_diag_elements)
-    if ks_stats.pvalue < 0.05:
-        print("diagonal distances statistically different from non-diagonal")
-        print(f'pvalue: {ks_stats.pvalue}, KS Statistic (D): {ks_stats.statistic}')
-    else:
-        print("Warning: diagonal distances NOT statistically different from non-diagonal")
 
+if fixed_cluster_num != 3:
+    non_fixed_clust_data = pd.DataFrame({
+        'optimal_cluster_list': optimal_cluster_list,
+        'session_size_list': session_size_list,
+        'pca_dimmensions': pca_dimmensions
+    })
 
-
-# %% Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
-# ==============================================================================
-# Scatter plot of optimal cluster size vs sessions size (i.e. number of MTMs)
-# ==============================================================================
-
-# Define jitter amount
-jitter_strength = 0.05  # Adjust the strength of jitter as needed
-
-# Add jitter to the session size and optimal clusters
-session_size_jittered = np.array(session_size_list) + np.random.normal(0, jitter_strength, len(session_size_list))
-optimal_cluster_jittered = np.array(optimal_cluster_list) + np.random.normal(0, jitter_strength, len(optimal_cluster_list))
-
-snslmplot_df = pd.DataFrame(
-    [[session_size_jittered, optimal_cluster_list]],
-    columns = ['size','cluster']
-    )
-snslmplot_df['session_size'] = session_size_jittered
-snslmplot_df = pd.DataFrame({'size': session_size_jittered, 'cluster': optimal_cluster_list})
-
-# Make scatter plot
-plt.scatter(session_size_jittered, optimal_cluster_list, c='cornflowerblue', marker='o')
-plt.xlabel('Session Size')
-plt.ylabel('Optimal Number of Clusters')
-plt.title(f'Optimal Cluster Number vs Session Size ({iterations} iterations)')
-scatter_plot_path = os.path.join(pca_dir, 'optimal_clusters_vs_session_size.png')
-plt.savefig(scatter_plot_path)
-plt.show()
-
-sns.lmplot(data = snslmplot_df, x='size', y='cluster', robust=True)
-sns.lmpl
-from scipy.stats import spearmanr
-
-rho, p_val = spearmanr(session_size_list, optimal_cluster_list)
-print(f"Spearman rho = {rho:.3f}, p = {p_val:.4f}")
-
-## Histogram of ditribution of optimal cluster sizes across all iterations
-mode_result = stats.mode(optimal_cluster_list, keepdims=False)
-print(f"The mode is: {mode_result[0]}")
+    output_file_path = os.path.join(dirname, 'non_fixed_clust_data.pkl')
+    non_fixed_clust_data.to_pickle(output_file_path)
     
-#plt.hist(optimal_cluster_list, bins=len(n_components_range), 
-plt.hist(optimal_cluster_list, bins=15,
-         color='cornflowerblue', 
-         edgecolor='black')
-plt.axvline(x=mode_result[0], 
-            color='red', 
-            linestyle='--', 
-            linewidth=2)
-plt.xlabel('Optimal Number of Clusters')
-plt.ylabel('Frequency')
-plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
-histogram_path = os.path.join(pca_dir, 'optimal_clusters_histogram.png')
-plt.savefig(histogram_path)
-plt.show()
+    print(f"non_fixed_clust_data DataFrame successfully saved to {output_file_path}")
 
-# %%
-# ==============================================================================
-# 
-# ==============================================================================
 
-# Create KDE plot
-plt.figure(figsize=(8, 5))
-sns.kdeplot(optimal_cluster_list, 
-            fill=True, 
-            color='black', 
-            bw_adjust=0.5,  # adjust for smoothness
-            clip=(1, 14),
-            linewidth=2.5)   # restrict KDE to 1-14
 
-# Add vertical line at the mode
-plt.axvline(x=mode_result[0], 
-            color='red', 
-            linestyle='--', 
-            linewidth=2)
-
-# Set axis limits and labels
-plt.xlim(1, 14)
-plt.xlabel('Optimal Number of Clusters')
-plt.ylabel('Density')
-plt.title(f'Distribution of Optimal Cluster Number ({iterations} iterations)')
-
-# Save the figure
-histogram_path = os.path.join(pca_dir, 'optimal_clusters_kde.png')
-plt.savefig(histogram_path)
-plt.show()
-plt.clf()
-
-#### Optimal # of cluster distribution #########
-#### THIS ONE IS NICE!!!! #########
-rounded_numbers = [round(num) for num in optimal_cluster_list]
-#plt.hist(optimal_cluster_list, bins=len(n_components_range), 
-plt.hist(rounded_numbers,
-         bins = np.arange(0, 16),
-         color='0.8', 
-         edgecolor='black',
-         linewidth=2)
-plt.axvline(x=mode_result[0]+0.5, #add 0.5 to shift value because of bin sizes
-            color='red', 
-            linestyle='--', 
-            linewidth=3.5)
-plt.xlabel('Optimal Number of Clusters')
-plt.ylabel('Frequency')
-plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
-plt.xlim(0.5, 14.5)
-
-# Center ticks on each bar with correct labels
-plt.xticks(ticks=np.arange(0.5, 15.0, 1), labels=np.arange(0, 15))
-plt.savefig("/home/natasha/Desktop/final_figures/optimal_cluster_freq.svg", format="svg")  # Save before show
-plt.savefig("/home/natasha/Desktop/final_figures/optimal_cluster_freq.png", format="png")  # Save before show
-plt.show()
-    
 
 # %% # Assign cluster numbers to events and save new dataframe
+### TODO: ONLY ASSIGN CLUSTER NUMBER AND SAVE IF FIXED CLUSTER NUM
 # ==============================================================================
 # Assign cluster numbers to events and save new dataframe
 # ==============================================================================
@@ -494,10 +348,8 @@ print(f"DataFrame successfully saved to {output_file_path}")
 
 
 
-
-
-
 # %% # Run GMM on UMAP of MTMs in individual sessions - OBSOLETE
+'''
 # ==============================================================================
 # Run GMM on UMAP of MTMs in individual sessions - OBSOLETE
 # ==============================================================================
@@ -633,3 +485,40 @@ plt.show()
 
 
 
+# %% OBSOLETE
+# ==============================================================================
+# UMAP of all MTMs in all sessions
+# ==============================================================================
+# Determine the optimal number of clusters using BIC
+bic_scores = []
+for n_components in n_components_range:
+    gmm = GaussianMixture(n_components=n_components, random_state=42)
+    gmm.fit(embedding)
+    bic = gmm.bic(embedding)
+    bic_scores.append(bic)
+
+# Find the number of components with the lowest BIC
+optimal_n_components = n_components_range[np.argmin(bic_scores)]
+print(f'All sessions: Optimal number of clusters is {optimal_n_components}')
+
+# Fit the GMM with the optimal number of clusters
+optimal_gmm = GaussianMixture(n_components=optimal_n_components, random_state=42)
+optimal_gmm.fit(embedding)
+labels = optimal_gmm.predict(embedding)
+   
+# Plot the UMAP projections with optimal GMM clusters
+plt.scatter(embedding[:,0], embedding[:,1], c=labels, cmap='viridis', s=5)
+plt.title(f'All Sessions: UMAP projection with GMM ({optimal_n_components} clusters)')
+umap_all_path = os.path.join(clust_dir, 'all_sessions_umap.png')
+plt.savefig(umap_all_path)
+plt.clf()
+
+# Plot BIC values for a range of cluster sizes
+plt.plot(n_components_range, bic_scores, marker='o')
+plt.xlabel('Number of clusters')
+plt.ylabel('BIC')
+plt.title('All Sessions: BIC Scores')
+bic_all_path = os.path.join(clust_dir, 'all_sessions_bic.png')
+plt.savefig(bic_all_path)
+plt.clf()   
+'''

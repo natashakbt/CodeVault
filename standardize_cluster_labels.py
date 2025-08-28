@@ -10,7 +10,13 @@ import umap
 import numpy as np
 import pandas as pd
 import os
+
+import matplotlib
+#matplotlib.use('Qt4Agg')
 import matplotlib.pyplot as plt
+#plt.ion()
+
+
 import glob
 from scipy.stats import chi2_contingency
 from scipy.stats import zscore
@@ -34,7 +40,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 from scipy.stats import gaussian_kde
 import matplotlib.colors as mcolors
-
+import matplotlib.lines as mlines
 
 # TODO: I THINK THIS CODE DOESN'T WORK AFTER THE LABELS HAVE BEEN STANDARDIZED ALREADY.
 # MAKE IT RE-RUN-ABLE FRIENDLY
@@ -45,20 +51,6 @@ import matplotlib.colors as mcolors
 dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
-
-'''
-# Remove any data for df that does not have an associated transition time in scaled_mode_tau
-df['basename'] = df['basename'].str.lower() # All basenames to lowercase
-
-# Manually removed this sepcific data:
-df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 1))]
-df = df[~((df['basename'] == 'km50_5tastes_emg_210911_104510_copy') & (df['taste'] == 4))]
-'''
-
-
-
-
-
 
 # ==============================================================================
 # Function to standardize MTM cluster labels
@@ -189,7 +181,7 @@ for (cluster, basename), group in cluster_basename_groups:
         plt.close(fig)
 
 
-# %%% Standardize Cluster Labels
+# %% Standardize Cluster Labels
 # ==============================================================================
 # Standardize Cluster Labels
 # ==============================================================================
@@ -415,11 +407,8 @@ ax.legend()
 plt.show()
 plt.close(fig)
 
-# %% UMAP
+# %% Different clusering within UMAP
 
-# ==============================================================================
-# Plot UMAP of waveforms, clustered by GMM 
-# ==============================================================================
 
 # See if multimodal waveforms cluster with UMAP reduction
 reducer = umap.UMAP()
@@ -427,55 +416,6 @@ filtered_df = df[df['cluster_num'] >= 0]
 waveforms = filtered_df['segment_norm_interp'].tolist()
 #scaled_waveforms = StandardScaler().fit_transform(waveforms)
 embedding = reducer.fit_transform(waveforms) # UMAP embedding
-
-# Fit the GMM with the optimal number of clustersz
-optimal_gmm = GaussianMixture(n_components=3, random_state=42)
-optimal_gmm.fit(embedding)
-labels = optimal_gmm.predict(embedding)
-
-# Add cluster number label to df dataframe
-filtered_df['gmm_cluster'] = labels
-
-# Create a list of colors for each point in the embedding based on its cluster_num
-cluster_nums = filtered_df['gmm_cluster'].tolist()
-
-# Create the scatter plot
-plt.figure(figsize=(10, 8))
-plt.scatter(embedding[:, 0], embedding[:, 1], c=cluster_nums, cmap='hot', s=20, edgecolor='k', alpha=0.5)
-plt.title('GMM on UMAP of Waveforms')
-plt.xlabel('UMAP 1')
-plt.ylabel('UMAP 2')
-
-# Optionally, add a legend or colorbar
-plt.show()
-
-
-
-# ==============================================================================
-# Plot UMAP of waveforms, clustered by k-means 
-# ==============================================================================
-  
-kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
-filtered_df['kmeans_cluster'] = kmeans.fit_predict(embedding)
-
-# Prepare for Plotting
-cluster_nums = filtered_df['kmeans_cluster'].tolist()
-
-# Create Scatter Plot
-plt.figure(figsize=(10, 8))
-plt.scatter(embedding[:, 0], embedding[:, 1], c=cluster_nums, cmap='tab20', s=20, edgecolor='k', alpha=0.5)
-plt.title('K-Means Clustering on UMAP of Waveforms')
-plt.xlabel('UMAP 1')
-plt.ylabel('UMAP 2')
-
-# Optionally, add a colorbar
-
-plt.show()
-
-
-# ==============================================================================
-# Plot UMAP, color by standardized cluster label
-# ==============================================================================
 # Define a color mapping for cluster numbers
 color_mapping = {
     -1: '#ff9900',      # Gapes Color for cluster -1
@@ -485,18 +425,24 @@ color_mapping = {
      2: '#0CBABA'        # Color for cluster 3
 }    
 
+
+# ==============================================================================
+# Plot UMAP, color by standardized cluster label
+# ==============================================================================
+
 # Create a list of colors for each point in the embedding based on its cluster_num
 cluster_nums = filtered_df['cluster_num'].tolist()  # Assuming 'cluster_num' column exists
 colors = [color_mapping[cluster] for cluster in cluster_nums]
 
 # Create the scatter plot
 plt.figure(figsize=(10, 8))
-plt.scatter(embedding[:, 0], embedding[:, 1], c=colors, s=50, edgecolor='k', alpha=0.7)
+#ax = fig.add_subplot(projection='3d')
+plt.ion()
+plt.scatter(embedding[:, 0], embedding[:, 1], c=colors,  edgecolor='k', alpha=0.7)
 plt.title('UMAP Scatter Plot of Waveforms')
 plt.xlabel('UMAP 1')
 plt.ylabel('UMAP 2')
 
-# Optionally, add a legend or colorbar
 plt.show()
 
 
@@ -623,7 +569,113 @@ def nonlinear_alpha_cmap(hex_color, n_levels=256, gamma=3.0):
 
 
 # Set up the plot
-plt.figure(figsize=(12, 10))
+#plt.figure(figsize=(12, 10))
+ax = plt.figure(figsize=(12, 10)).add_subplot(projection='3d')
+# Reset index to align with embedding
+reset_filtered_df = filtered_df.reset_index(drop=True)
+cluster_cycle = [0, 1, 2]
+center_points = []
+
+# KDE grid resolution
+grid_j = 80
+'''
+for cluster_num in cluster_cycle:
+    cluster_df = reset_filtered_df[reset_filtered_df['cluster_num'] == cluster_num]
+    cluster_indices = cluster_df.index
+    embedding_cluster = embedding[cluster_indices]
+
+    # Get x and y
+    x = embedding_cluster[:, 0]
+    y = embedding_cluster[:, 1]
+    color = color_mapping[cluster_num]
+
+    # Plot the scatter points
+    plt.scatter(x, y, c=color, s=12, edgecolor=color, alpha=0.1, label=f'Cluster {cluster_num}')
+'''
+for cluster_num in cluster_cycle:
+    cluster_df = reset_filtered_df[reset_filtered_df['cluster_num'] == cluster_num]
+    cluster_indices = cluster_df.index
+    embedding_cluster = embedding[cluster_indices]
+
+    # Get x and y
+    x = embedding_cluster[:, 0]
+    y = embedding_cluster[:, 1]
+    color = color_mapping[cluster_num]
+    # KDE
+    kde = gaussian_kde(np.vstack([x, y]))
+
+    xmin, xmax = x.min(), x.max()
+    ymin, ymax = y.min(), y.max()
+
+    xx, yy = np.mgrid[xmin:xmax:grid_j*1j, ymin:ymax:grid_j*1j]
+    positions = np.vstack([xx.ravel(), yy.ravel()])
+    density = kde(positions).reshape(xx.shape)
+
+    cmap = nonlinear_alpha_cmap(color_mapping[cluster_num], gamma=3)  # Try gamma = 3 to 5
+    ax.plot_surface(xx, yy, density, cmap=cmap)
+    
+    ## Density peak dots
+    # Find center
+    max_idx = np.unravel_index(np.argmax(density), density.shape)
+    x_center = xx[max_idx]
+    y_center = yy[max_idx]
+    center_points.append([x_center, y_center])
+    # Plot red center dot
+    plt.plot(x_center, y_center, density[max_idx], 'ro', markersize=25, markeredgecolor='k')
+    
+    
+
+# Create circle marker legend handles with solid color
+legend_handles = []
+for cluster_num in cluster_cycle:
+    color = color_mapping[cluster_num]
+    handle = mlines.Line2D([], [], color=color, marker='o', linestyle='None',
+                           markersize=10, label=f'Cluster {cluster_num+1}')
+    legend_handles.append(handle)
+
+# Optional: Add red circle for density peak
+peak_handle = mlines.Line2D([], [], color='red', marker='o', linestyle='None',
+                            markersize=10, label='Density Peaks')
+legend_handles.append(peak_handle)
+
+plt.legend(handles=legend_handles)
+
+# Remove all grid lines
+ax.grid(False)
+
+# Make only the floor (xy plane at z=0) visible
+ax.xaxis.pane.fill = False
+ax.yaxis.pane.fill = False
+
+# Set floor color (z plane)
+ax.zaxis.pane.set_facecolor((0.97, 0.97, 0.97))  # RGB
+
+
+ax.set_xticks([])
+ax.set_yticks([])
+ax.set_zticks([])
+
+ax.set_xticklabels([])
+ax.set_yticklabels([])
+ax.set_zticklabels([])
+
+# Final touches
+plt.title('UMAP with KDE Density and Cluster Centers')
+plt.xlabel('UMAP 1')
+plt.ylabel('UMAP 2')
+ax.set_zlabel('Density')
+#plt.legend()
+plt.tight_layout()
+ax.view_init(elev=15, azim=-110)  # adjust numbers to taste
+plt.savefig("/home/natasha/Desktop/final_figures/3d_umap_kde_clusters.svg", format="svg")  # Save before show
+plt.savefig("/home/natasha/Desktop/final_figures/3d_umap_kde_clusters.png", format="png")  # Save before show
+#plt.show()
+
+# %% 2D UMAP with KDE Density and Density Peaks
+
+
+# Set up the plot
+fig, ax = plt.subplots(figsize=(12, 10))
 
 # Reset index to align with embedding
 reset_filtered_df = filtered_df.reset_index(drop=True)
@@ -644,7 +696,7 @@ for cluster_num in cluster_cycle:
     color = color_mapping[cluster_num]
 
     # Plot the scatter points
-    plt.scatter(x, y, c=color, s=12, edgecolor=color, alpha=0.1, label=f'Cluster {cluster_num}')
+    ax.scatter(x, y, c=color, s=12, edgecolor=color, alpha=0.2, label=f'Cluster {cluster_num}')
 
 for cluster_num in cluster_cycle:
     cluster_df = reset_filtered_df[reset_filtered_df['cluster_num'] == cluster_num]
@@ -655,36 +707,56 @@ for cluster_num in cluster_cycle:
     x = embedding_cluster[:, 0]
     y = embedding_cluster[:, 1]
     color = color_mapping[cluster_num]
+
     # KDE
     kde = gaussian_kde(np.vstack([x, y]))
 
-    xmin, xmax = x.min(), x.max()
-    ymin, ymax = y.min(), y.max()
+    # Expand plotting limits slightly to avoid clipping
+    x_margin = (x.max() - x.min()) * 0.05
+    y_margin = (y.max() - y.min()) * 0.05
+    xmin, xmax = x.min() - x_margin, x.max() + x_margin
+    ymin, ymax = y.min() - y_margin, y.max() + y_margin
 
     xx, yy = np.mgrid[xmin:xmax:grid_j*1j, ymin:ymax:grid_j*1j]
     positions = np.vstack([xx.ravel(), yy.ravel()])
     density = kde(positions).reshape(xx.shape)
-    
-    #cmap = transparent_cmap(color_mapping[cluster_num])
-    #plt.contourf(xx, yy, density, levels=80, cmap=cmap)
-    
-    cmap = nonlinear_alpha_cmap(color_mapping[cluster_num], gamma=3.0)  # Try gamma = 3 to 5
-    plt.contourf(xx, yy, density, levels=200, cmap=cmap)
-    
-    #plt.contour(xx, yy, density, levels=10, colors=[color], linewidths=1)
-    
+
+    cmap = nonlinear_alpha_cmap(color_mapping[cluster_num], gamma=4)
+    ax.contourf(xx, yy, density, levels=75, cmap=cmap)
+
     # Find center
     max_idx = np.unravel_index(np.argmax(density), density.shape)
     x_center = xx[max_idx]
     y_center = yy[max_idx]
     center_points.append([x_center, y_center])
-    
-    # Plot red center dot
-    plt.plot(x_center, y_center, 'ro', markersize=10, markeredgecolor='k')
 
-    #plt.plot(x_center, y_center, 'ro', markersize=10, markeredgecolor='k', label='Density Peak')
-    
-import matplotlib.lines as mlines
+    # Plot red center dot
+    ax.plot(x_center, y_center, 'ro', markersize=20, markeredgecolor='k')
+
+# Remove all axes
+ax.set_xticks([])
+ax.set_yticks([])
+ax.set_frame_on(False)
+
+# Add two small reference lines in bottom-left corner
+offset_x = (xmax - xmin) * 0.04  # 2% inset from left
+offset_y = (ymax - ymin) * 0.05  # 2% inset from bottom
+corner_x, corner_y = xmin + offset_x, ymin + offset_y
+
+line_length_x = (xmax - xmin) * 0.10  # 10% of x-range
+line_length_y = (ymax - ymin) * 0.10  # 10% of y-range
+
+# Plot inset mini axes
+ax.plot([corner_x, corner_x + line_length_x], [corner_y, corner_y], color='k', lw=4)  # x-axis
+ax.plot([corner_x, corner_x], [corner_y, corner_y + line_length_y], color='k', lw=4)  # y-axis
+
+
+# Add labels at the end of the mini axes
+# Add labels in the middle of the mini axes
+ax.text(corner_x + line_length_x / 2, corner_y - (ymax - ymin)*0.015, 
+        'UMAP 1', fontsize=16, ha='center', va='top')
+ax.text(corner_x - (xmax - xmin)*0.015, corner_y + line_length_y / 2, 
+        'UMAP 2', fontsize=16, ha='right', va='center', rotation='vertical')
 
 # Create circle marker legend handles with solid color
 legend_handles = []
@@ -699,19 +771,14 @@ peak_handle = mlines.Line2D([], [], color='red', marker='o', linestyle='None',
                             markersize=10, label='Density Peaks')
 legend_handles.append(peak_handle)
 
-plt.legend(handles=legend_handles)
-
+ax.legend(handles=legend_handles)
 
 # Final touches
 plt.title('UMAP with KDE Density and Cluster Centers')
-plt.xlabel('UMAP 1')
-plt.ylabel('UMAP 2')
-#plt.legend()
 plt.tight_layout()
-plt.savefig("/home/natasha/Desktop/final_figures/umap_kde_clusters.svg", format="svg")  # Save before show
-plt.savefig("/home/natasha/Desktop/final_figures/umap_kde_clusters.png", format="png")  # Save before show
+plt.savefig("/home/natasha/Desktop/final_figures/umap_kde_clusters.svg", format="svg")
+plt.savefig("/home/natasha/Desktop/final_figures/umap_kde_clusters.png", format="png")
 plt.show()
-
 
 # %%
 
@@ -737,7 +804,7 @@ plt.savefig("/home/natasha/Desktop/final_figures/prototypical_waveform.png", for
 plt.show()
 
 
-# %%
+# %% ARCHIVE - a bunch of different UMAP plotting and clustering code
 
 # Create the scatter plot
 plt.figure(figsize=(10, 8))
@@ -756,11 +823,10 @@ plt.ylabel('UMAP 2')
 plt.show()
 
 # ==============================================================================
-# 3D UMAP
+# 3D UMAP (3 dimmensions of UMAP)
 # ==============================================================================
 # Initialize UMAP reducer with 3 components for 3D embedding
 reducer = umap.UMAP(n_components=3)
-
 # Filter valid clusters
 filtered_df = df[df['cluster_num'] >= 0]
 waveforms = filtered_df['segment_norm_interp'].tolist()
@@ -768,6 +834,7 @@ waveforms = filtered_df['segment_norm_interp'].tolist()
 # Compute 3D UMAP embedding
 embedding = reducer.fit_transform(waveforms)
 
+embedding = embedding[::10]
 # Define color mapping for clusters
 color_mapping = {
     -1: '#ff9900',  # Gapes Color for cluster -1
@@ -781,7 +848,11 @@ color_mapping = {
 cluster_nums = filtered_df['cluster_num'].tolist()
 colors = [color_mapping[cluster] for cluster in cluster_nums]
 
+colors = colors[::10]
+
 # Create 3D scatter plot
+
+
 fig = plt.figure(figsize=(10, 8))
 ax = fig.add_subplot(111, projection='3d')
 
@@ -799,7 +870,12 @@ plt.show()
 
    
 
-# %% PLOTS TO SEE IF NEWLY STANDARDIZED CLUSTERS LOOK DIFFERENT - IN PROGRESS
+
+
+# %% - ARCHIVE
+
+'''
+# PLOTS TO SEE IF NEWLY STANDARDIZED CLUSTERS LOOK DIFFERENT - IN PROGRESS
 
 # ==============================================================================
 # Plot heatmap. Each column is a feature and each row is a waveform's feature vector
@@ -1151,125 +1227,7 @@ plt.xlabel('PCA 0')
 plt.ylabel('PCA 1')
 plt.show()
 
-# %% STATS TO SEE IF NEWLY STANDARDIZED CLUSTERS ARE DIFFERENT - IN PROGRESS
 
-# ==============================================================================
-# Three variations of stats to see if features are significantly different across clusters
-# ==============================================================================
-feature_names = [
-    "duration",
-    "left_interval",
-    "right_interval",
-    "max_freq",
-    "amplitude_norm",
-    "pca_0",
-    "pca_1",
-    "pca_2"
-]
-
-features_expanded = pd.DataFrame(df["features"].tolist(), index=df.index, columns=feature_names)
-# Add cluster_num column at the front
-features_expanded.insert(0, "cluster_num", df["cluster_num"])
-
-# Sort the rows by cluster number
-features_expanded = features_expanded.sort_values(by="cluster_num")
-
-# Remove rows where cluster num is a negative value
-features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
-
-
-# ANOVA and on a random n=50 sample of waveforms for each feature
-feature_dict = {key: [] for key in feature_names}
-
-for _ in range(1000):
-    for feature in feature_names:
-        group_zero = features_expanded[features_expanded["cluster_num"] == 0][feature].sample(n=50)
-        group_one = features_expanded[features_expanded["cluster_num"] == 1][feature].sample(n=50)
-        group_two = features_expanded[features_expanded["cluster_num"] == 2][feature].sample(n=50)
-
-        f_statistic, p_value = stats.f_oneway(group_zero, group_one, group_two)
-        feature_dict[feature].append(p_value)
-        #if p_value < 0.05:   
-        #    print(f'{feature}: {p_value}')
-        #else:
-        #    print(f'{feature} not significant ({p_value})')
-# Plot the distribution of p-values for each feature
-for feature, p_values in feature_dict.items():
-    plt.figure(figsize=(12, 8))
-    sns.histplot(p_values, bins=10, kde=True)
-    plt.axvline(x=0.05, color="red", linestyle="--")
-    plt.title(f"P-Values for {feature}")
-    plt.xlabel("p-value")
-    plt.ylabel("Count")
-    plt.show()
-
-
-'''
-# ANOVA and Tukey HSD post-hoc
-# I think the data is not always normal - so not as good of a test
-for feature in feature_names:
-    group_zero = features_expanded[features_expanded["cluster_num"] == 0][feature]
-    group_one = features_expanded[features_expanded["cluster_num"] == 1][feature]
-    group_two = features_expanded[features_expanded["cluster_num"] == 2][feature]
-    data_ano = pd.DataFrame({
-        "score": pd.concat([group_zero, group_one, group_two]).values,
-        "group": ["0"] * len(group_zero) + ["1"] * len(group_one) + ["2"] * len(group_two)
-    })
-    
-    anova_results = pg.anova(dv='score', between="group", data=data_ano, detailed=True)
-    print(f"feature: {feature}\n", anova_results.round(3))
-    if anova_results["p-unc"][0] < 0.05 and anova_results["np2"][0] > 0.06:
-        print("significant and medium-large effect size")
-        res = tukey_hsd(group_zero, group_one, group_two)
-        #res = pairwise_tukeyhsd(data_ano["score"], data_ano["group"]) # Does this work for Tukey-Kramer?
-        print(res)
-    elif anova_results["p-unc"][0] < 0.05 and anova_results["np2"][0] > 0.01:
-        print("significant but small effect size")
-    print("\n")
-
-'''
-
-
-# KRUSKAL WALLIS WITH DUNN'S POST-HOC: FOR NON-NORMAL DATA
-# Most correct?
-for feature in feature_names:
-    h_stat, p_value = stats.kruskal(features_expanded[features_expanded["cluster_num"] == 0][feature],
-                                    features_expanded[features_expanded["cluster_num"] == 1][feature],
-                                    features_expanded[features_expanded["cluster_num"] == 2][feature])
-    
-    # Calculate Eta-squared for effect size
-    k = 3  # number of groups (clusters)
-    N = len(features_expanded)  # total number of observations
-    eta_squared = (h_stat - k + 1) / (N - k)
-    
-    
-    print(feature)
-    print(f'{h_stat:.2f}, {p_value:.4f}, {eta_squared:.4f}\n')
-    
-    if p_value < 0.05 :
-        if eta_squared > 0.04:  # Only proceed if Kruskal-Wallis is significant
-            print(f"{feature} p-value: {p_value}")
-            print(f"H-stat {h_stat.round(3)}, effect size: {eta_squared.round(4)}")
-            
-            # Perform Dunn’s test with Bonferroni correction
-            dunn_results = sp.posthoc_dunn(features_expanded, val_col=feature, group_col="cluster_num", p_adjust="bonferroni")
-            print(dunn_results)
-
-        elif eta_squared > 0.01:
-            print(f'{feature} is signficiant ({p_value}) but weak effect size ({eta_squared.round(4)})')
-        else:
-            print(f'{feature} is signficiant ({p_value}) but inconsequential effect size')
-    else:
-        print(f'{feature} not significant ({p_value})')
-    print('\n')
-
-
-
-
-# %% - ARCHIVE
-
-
-'''
 
 
 def standardize_labels(this_vector_df, next_basename):

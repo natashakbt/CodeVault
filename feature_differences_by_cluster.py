@@ -19,14 +19,8 @@ from sklearn import metrics
 from sklearn.metrics import confusion_matrix
 from scipy import stats
 from tqdm import tqdm
-from sklearn.inspection import DecisionBoundaryDisplay
-from sklearn.neighbors import NeighborhoodComponentsAnalysis
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.pipeline import make_pipeline
 import seaborn as sns
 import scikit_posthocs as sp
-from itertools import combinations
-from scipy.stats import ks_2samp
 from scipy.stats import mannwhitneyu
 from statannotations.Annotator import Annotator
 
@@ -67,36 +61,39 @@ features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
 X = features_expanded.drop(columns=["cluster_num"])
 y = features_expanded["cluster_num"]
 
+# For saving stats
+feature_results = pd.DataFrame(columns=['feature', 'H', 'p', 'epsilon', 'effect_size'])
+
 
 # %% PC0
 # ==============================================================================
-# PC0
+# PC0 - Mann Whitney U test
 # ==============================================================================
-# Kruskal-Wallis test
-groups = [group['pca_0'].values for name, group in features_expanded.groupby('cluster_num')]
-kruskal_stat, kruskal_p = stats.kruskal(*groups)
+pc0_cluster1 = features_expanded[features_expanded["cluster_num"] == 0]['pca_0']
+pc0_cluster2 = features_expanded[features_expanded["cluster_num"] == 1]['pca_0']
+pc0_cluster3 = features_expanded[features_expanded["cluster_num"] == 2]['pca_0']
 
-print(f"Kruskal-Wallis H={kruskal_stat:.3f}, p={kruskal_p:.3e}")
+# Define cluster pairs
+pairs = [
+    ('Cluster 0 vs 1', pc0_cluster1, pc0_cluster2),
+    ('Cluster 0 vs 2', pc0_cluster1, pc0_cluster3),
+    ('Cluster 1 vs 2', pc0_cluster2, pc0_cluster3)
+]
 
 
-if kruskal_p < 0.05:
-    dunn_stats = sp.posthoc_dunn(
-        features_expanded,
-        val_col='pca_0',
-        group_col='cluster_num',
-    )
+for name, group1, group2 in pairs:
+    u_stat, p_value = mannwhitneyu(group1, group2, alternative='two-sided')
+    print(f"{name}: U={u_stat}, p={p_value:.4f}")
     
-    print("\nDunn's post-hoc test p-values:")
-    print(dunn_stats)
-
-#TODO HOW TO REPORT EFFECT SIZE FOR DUNN'S?
-
 color_mapping = {
     0: '#4285F4',
     1: '#88498F',
     2: '#0CBABA'
 }
 
+# ==============================================================================
+# PC0 - plotting
+# ==============================================================================
 plt.figure(figsize=(10,7))
 ax = sns.boxplot(
     data=features_expanded,
@@ -125,91 +122,79 @@ plt.savefig(png_pc0_plot)
 plt.savefig(svg_pc0_plot)
 plt.show()
 
-
-# %% TRAINING SVM LEAVE-ONE-ANIMAL-OUT + PLOTTING CONFUSION MATRIX - NEW
+# %%
 # ==============================================================================
-# Training SVM
+# Three variations of stats to see if features are significantly different across clusters
 # ==============================================================================
 
+features_expanded = pd.DataFrame(df["features"].tolist(), index=df.index, columns=feature_names)
+features_expanded.insert(0, "cluster_num", df["cluster_num"]) # Add cluster_num column at the front
+features_expanded = features_expanded.sort_values(by="cluster_num") # Sort the rows by cluster number
+features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0] # Remove rows where cluster num is a negative value
 
-session_ind = features_expanded['session_ind'].unique()
 
-sample_frac = 0.3  # 30% of the training data
-accuracy_scores = []
-confusion_matrices = []
-# Train the classifier 10x
-for session_i in tqdm(session_ind):
-    session_df = features_expanded[features_expanded['session_ind'] == session_i]
-    animal_num = session_df['animal_num'].iloc[0]
-    train_df = features_expanded[features_expanded['animal_num'] != animal_num]
-    if session_i in train_df['session_ind'].values:
-        print(f"uh oh {session_i}")
+feature_dict = {key: [] for key in feature_names}
 
-    X_train_all = train_df.drop(columns = ['cluster_num', 'animal_num', 'session_ind'])
-    y_train_all = train_df['cluster_num']
+for _ in range(1000):
+    for feature in feature_names:
+        group_zero = features_expanded[features_expanded["cluster_num"] == 0][feature].sample(n=50)
+        group_one = features_expanded[features_expanded["cluster_num"] == 1][feature].sample(n=50)
+        group_two = features_expanded[features_expanded["cluster_num"] == 2][feature].sample(n=50)
+
+        f_statistic, p_value = stats.f_oneway(group_zero, group_one, group_two)
+        feature_dict[feature].append(p_value)
+        #if p_value < 0.05:   
+        #    print(f'{feature}: {p_value}')
+        #else:
+        #    print(f'{feature} not significant ({p_value})')
+# Plot the distribution of p-values for each feature
+for feature, p_values in feature_dict.items():
+    plt.figure(figsize=(12, 8))
+    sns.histplot(p_values, bins=10, kde=True)
+    plt.axvline(x=0.05, color="red", linestyle="--")
+    plt.title(f"P-Values for {feature}")
+    plt.xlabel("p-value")
+    plt.ylabel("Count")
+    plt.show()
+
+
+
+# KRUSKAL WALLIS FOR NON-NORMAL DATA
+for feature in feature_names:
+    h_stat, p_value = stats.kruskal(features_expanded[features_expanded["cluster_num"] == 0][feature],
+                                    features_expanded[features_expanded["cluster_num"] == 1][feature],
+                                    features_expanded[features_expanded["cluster_num"] == 2][feature])
     
-    X_test = session_df.drop(columns = ['cluster_num', 'animal_num', 'session_ind'])
-    y_test = session_df['cluster_num']
-
-    X_train = X_train_all.sample(frac=sample_frac, random_state=42)
-    y_train = y_train_all.loc[X_train.index]
-    #test_indices = X_test.index
+    # Calculate Eta-squared for effect size
+    k = 3  # number of groups (clusters)
+    N = len(features_expanded)  # total number of observations
+    epsilon_squared = (h_stat - k + 1) / (N - k)
     
-    rbf_svc = svm.SVC(kernel='rbf', probability=True) # Non-linear
-    rbf_svc.fit(X_train, y_train)
     
-    y_pred = rbf_svc.predict(X_test) 
-    y_proba = rbf_svc.predict_proba(X_test)
-
-    #print("Accuracy:", metrics.accuracy_score(y_test, y_pred))
-    accuracy_scores.append(metrics.accuracy_score(y_test, y_pred))
+    print(feature)
+    print(f'{h_stat:.2f}, {p_value:.4f}, {epsilon_squared:.4f}\n')
     
-    matrix = confusion_matrix(y_test, y_pred, normalize='pred')
-    confusion_matrices.append(matrix)
-
-
-# Building average confusion matrix and std
-matrices_as_array = np.array(confusion_matrices)
-average_matrix = matrices_as_array.mean(axis=0)
-std_matrix = matrices_as_array.std(axis=0)
-
-# Plot the average confusion matrix with black and white colormap
-plt.figure(figsize=(10, 10))  # Adjust size as needed
-plt.imshow(average_matrix, cmap='Greys_r')
-
-# Set tick labels
-plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
-plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
-
-# Axis labels
-plt.xlabel("Predicted Cluster Labels")
-plt.ylabel("True Cluster Labels")
-
-# Add text annotations to each cell
-for i in range(average_matrix.shape[0]):
-    for j in range(average_matrix.shape[1]):
-        mean_val = average_matrix[i, j]
-        std_val = std_matrix[i, j]
-        
-        text = f"{mean_val:.2f}\n±{std_val:.2f}"
-        #text = f"{mean_val:.2f}"
-        text_color = 'black' if mean_val > 0.5 else 'white'
-        
-        plt.text(j, i, text, ha='center', va='center',
-                 color=text_color, fontsize=40, fontweight='bold')
-
-
-# Add title
-plt.title("Average Confusion Matrix")
-
-# Show the plot
-plt.tight_layout()
-plt.show()
-t_stat, p_value = stats.ttest_1samp(accuracy_scores, 0.3)
-if p_value < 0.05:
-    print(f'The mean accuracy is significantly above 0.3 (p-value: {p_value})')
-else:
-    print('The mean accuracy is not significantly different from chance!')
+    if p_value < 0.05 :
+        if epsilon_squared > 0.16:  # Only proceed if Kruskal-Wallis is significant
+            print(f"{feature} p-value: {p_value}")
+            print(f"H-stat {h_stat.round(3)}, effect size: {epsilon_squared.round(4)}")
+            effect_size = 'relatively strong'
+        elif epsilon_squared > 0.04:  # Only proceed if Kruskal-Wallis is significant
+            print(f"{feature} p-value: {p_value}")
+            print(f"H-stat {h_stat.round(3)}, effect size: {epsilon_squared.round(4)}")
+            effect_size = 'moderate'
+        elif epsilon_squared > 0.01:
+            print(f'{feature} is signficiant ({p_value}) but weak effect size ({epsilon_squared.round(4)})')
+            effect_size = 'weak'
+            
+        else:
+            print(f'{feature} is signficiant ({p_value}) but inconsequential effect size')
+            effect_size = 'negligible'
+    else:
+        print(f'{feature} not significant ({p_value})')
+        effect_size = 'n/a'
+    print('\n')
+    feature_results.loc[len(feature_results)] = [feature, h_stat, p_value, epsilon_squared, effect_size]
 
 
 
@@ -217,7 +202,7 @@ else:
 # %% MEASURING WAVEFORM METRICS
 # ==============================================================================
 # Measuring waveform metrics
-# Negative gradient, positive gradient, amplitude, width (50%), area under the curve
+# Negative gradient, positive gradient, amplitude, width (at 50% max amplitude), area under the curve
 # symmetry (pearson's r), skew
 # ==============================================================================
 
@@ -226,7 +211,7 @@ new_columns = ['amplitude', 'area', 'width',
                'pos_grad', 'neg_grad', 'symmetry', 'skew']
 waveform_metrics_df[new_columns] = np.nan
 
-for index, row in waveform_metrics_df.iterrows():
+for index, row in tqdm(waveform_metrics_df.iterrows()):
     waveform= row['segment_raw']
     max_val = waveform.max()
     
@@ -264,57 +249,6 @@ for index, row in waveform_metrics_df.iterrows():
 # ==============================================================================
 subset_df = waveform_metrics_df[waveform_metrics_df['cluster_num'].isin([0, 1, 2])]
 
-
-# Loop through each metric and plot a violin plot
-for metric in new_columns:
-    plt.figure(figsize=(6, 4))
-    sns.violinplot(data=subset_df, x='cluster_num', y=metric)
-    plt.title(f'{metric}')
-    plt.xlabel('Cluster Number')
-    plt.ylabel(metric)
-    plt.tight_layout()
-    plt.show()
-    
- # Loop through each metric and plot a box plot   
-for metric in new_columns:
-    plt.figure(figsize=(6, 4))
-    sns.boxenplot(data=subset_df, x='cluster_num', y=metric)
-    plt.title(f'{metric}')
-    plt.xlabel('Cluster Number')
-    plt.ylabel(metric)
-    plt.tight_layout()
-    plt.show()
-
-'''
-# Kolmogorov-Smirnov test
-ks_results = []
-for metric in new_columns:
-    # Group values by true_label
-    print(f"\n🔍 {metric}")
-    metric_results = {'metric': metric}
-    groups = {label: subset_df[subset_df['cluster_num'] == label][metric] for label in [0, 1, 2]}
-    
-    for (label1, label2) in combinations(groups.keys(), 2):
-        stat, p = ks_2samp(groups[label1], groups[label2])
-        key = f"{label1}_vs_{label2}"
-        metric_results[f"ks_stat_{key}"] = stat
-        metric_results[f"ks_p_{key}"] = p
-
-        print(f"KS test {key}: stat = {stat:.3f}, p = {p:.3f}")
-        if p < 0.05:
-            if stat < 0.05:
-                print("→ Neglibile effect")
-            elif stat < 0.2:
-                print("→ Small effect")
-            elif stat < 0.3:
-                print("→ Medium effect")
-            else:
-                print("→ Large effect")
-        else:
-            print("not significant")
-    
-    ks_results.append(metric_results)
-'''
 # Kruskal-wallis test
 results = []
 for metric in new_columns:
@@ -352,8 +286,30 @@ for metric in new_columns:
     else:
         print("not significant")
 
+    if p_value < 0.05 :
+        if epsilon_squared > 0.16:  # Only proceed if Kruskal-Wallis is significant
+            print(f"{feature} p-value: {p_value}")
+            print(f"H-stat {h_stat.round(3)}, effect size: {epsilon_squared.round(4)}")
+            effect_size = 'relatively strong'
+        elif epsilon_squared > 0.04:  # Only proceed if Kruskal-Wallis is significant
+            print(f"{feature} p-value: {p_value}")
+            print(f"H-stat {h_stat.round(3)}, effect size: {epsilon_squared.round(4)}")
+            effect_size = 'moderate'
+        elif epsilon_squared > 0.01:
+            print(f'{feature} is signficiant ({p_value}) but weak effect size ({epsilon_squared.round(4)})')
+            effect_size = 'weak'
+            
+        else:
+            print(f'{feature} is signficiant ({p_value}) but inconsequential effect size')
+            effect_size = 'negligible'
+    else:
+        print(f'{feature} not significant ({p_value})')
+        effect_size = 'n/a'
+    print('\n')
+    feature_results.loc[len(feature_results)] = [metric, h_stat, p_value, epsilon_squared, effect_size]
 
-
+# %% Save statistical results
+feature_results.to_csv('/home/natasha/Desktop/clustering_data/feature_results.csv', index=False)
 
 # %% MEASURING WAVEFORM METRICS - CLUSTER SPECIFIC- IF THEY CHANGE BY 'before' VS 'after' EVENT_POSITION
 # ==============================================================================
@@ -446,7 +402,7 @@ for cluster_num in cluster_num_i_care_about:
 '''
 # %% TRAINING SVM + PLOTTING CONFUSION MATRIX - OLD
 # ==============================================================================
-# Training SVM
+# Training SVM (80/20 split)
 # ==============================================================================
 
 

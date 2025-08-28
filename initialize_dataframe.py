@@ -43,6 +43,17 @@ df = df[["features", "segment_raw", "segment_norm_interp",
 df.reset_index(drop=True, inplace=True)
 
 # ==============================================================================
+# Test rows for duplicates -> could be caused by incorrect duplicate waveforms
+# ==============================================================================
+test_df = df.drop(["segment_raw", "features", "segment_norm_interp", "raw_features"], axis=1)
+
+if test_df.duplicated().sum() > 0:
+    print("Warning: There are some duplicate rows in the dataframe")
+if df["features"].apply(lambda x: tuple(x)).duplicated().sum() > 0:
+    print("Warning: Some of the rows in the DataFrame have duplicate feature vectors")
+
+
+# ==============================================================================
 # Save new dataframe
 # ==============================================================================
 ## Save the new dataframe into a pickle file

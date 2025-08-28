@@ -40,7 +40,6 @@ df['taste_name'] = df['taste_name'].replace('succ', 'suc')
 df['taste_name'] = df['taste_name'].replace('sucd', 'suc')
 df['taste_name'] = df['taste_name'].replace('quinc', 'qhcl')
 
-
 # ==============================================================================
 # Important variables to set
 # ==============================================================================
@@ -382,7 +381,7 @@ for (basename, taste_name), taste_group in tqdm(grouped):
 # Raster plot of events around the transition, 1 plot per session per taste
 # ==============================================================================
 
-desired_clust_to_plot = 2 # which cluster_num to plot?
+desired_clust_to_plot = 1 # which cluster_num to plot?
 
 # Clear and create folder directory
 single_clust_dir = os.path.join(dirname, 'single_cluster_raster_transition')
@@ -399,15 +398,7 @@ for (basename, taste), taste_group in grouped:
     ax.set_title(f"Taste: {taste_name}")
 
     for trial, trial_data in taste_group.groupby('trial_num'):
-        if math.isnan(fixed_transition_time):
-            transition_time_point = expanded_df.loc[
-                (expanded_df['trial_num'] == trial) & 
-                (expanded_df['taste_num'] == str(taste)) & 
-                (expanded_df['basename'] == basename), 
-                'scaled_mode_tau'
-            ].values[0]
-        else:
-            transition_time_point = fixed_transition_time
+        transition_time_point = fixed_transition_time
 
         for _, row in trial_data.iterrows():
             cluster_num = row['cluster_num']
@@ -427,8 +418,8 @@ for (basename, taste), taste_group in grouped:
     plt.suptitle(f'{basename}')
 
     plt.tight_layout()
-    png_path = os.path.join(single_clust_dir, f"{basename}_{taste_name}_transitions.png")
-    svg_path = os.path.join(single_clust_dir, f"{basename}_{taste_name}_transitions.svg")
+    png_path = os.path.join(single_clust_dir, f"{taste_name}_{basename}_transitions.png")
+    svg_path = os.path.join(single_clust_dir, f"{taste_name}_{basename}_transitions.svg")
     plt.savefig(png_path)
     plt.savefig(svg_path)
     plt.close()
@@ -440,12 +431,13 @@ for (basename, taste), taste_group in grouped:
 # WHY ISN'T THIS WORKING
 # ==============================================================================
 
+desired_clust_to_plot = 1 # which cluster_num to plot?
 
 for (basename, taste), taste_group in grouped:
-    if basename == 'nm43_2500ms_160515_104159':
+    if basename == 'nb32_test2_4tastes_240203_121309' and taste == 1:
         transition_time_point = fixed_transition_time
         behaviors_to_plot_this_round = taste_group[taste_group['cluster_num'] == desired_clust_to_plot]
-        behaviors_to_plot_this_round = behaviors_to_plot_this_round[behaviors_to_plot_this_round['taste_name'] == 'suc']
+        behaviors_to_plot_this_round = behaviors_to_plot_this_round[behaviors_to_plot_this_round['taste_num'] == taste]
         behaviors_to_plot_this_round = behaviors_to_plot_this_round.drop_duplicates(subset=['segment_bounds'])
         
         
@@ -466,12 +458,13 @@ for (basename, taste), taste_group in grouped:
 
             # Add 1 to all bins where the behavior is active
             freq_trace += ((time_bins >= start) & (time_bins <= end)).astype(float)
-
+        window_size = 20  # adjust for more/less smoothing
+        freq_trace_smoothed = np.convolve(freq_trace, np.ones(window_size)/window_size, mode='same')
+        ax_freq.step(time_bins, freq_trace_smoothed, color='black', linewidth=2, where='mid')
         # Step plot for exact counts
-        ax_freq.step(time_bins, freq_trace, color='black', linewidth=2, where='mid')
+        #ax_freq.step(time_bins, freq_trace, color='black', linewidth=2, where='mid')
         ax_freq.axvline(0, color='k', linestyle='--')
         ax_freq.set_xlim([-window_len, window_len])
-        ax_freq.set_ylim([0, 15])
         ax_freq.set_ylabel('Frequency')
         ax_freq.set_xticklabels([])  # hide x-axis labels
         ax_freq.set_title(f"Taste: {convert_taste_num_to_name(basename, taste, df)}")
@@ -490,7 +483,6 @@ for (basename, taste), taste_group in grouped:
             
             ax_raster.hlines(y=trial_num, xmin=start, xmax=end,
                              color=color_mapping.get(desired_clust_to_plot, 'black'), linewidth=8)
-            print(end-start)
         ax_raster.set_xlim([-window_len, window_len])
         ax_raster.axvline(0, color='k', linestyle='--')
         ax_raster.set_ylabel('Trial')
@@ -498,6 +490,8 @@ for (basename, taste), taste_group in grouped:
 
         plt.suptitle(f'{basename}')
 
+        plt.savefig('/home/natasha/Desktop/final_figures/raster_plot.svg')
+        plt.savefig('/home/natasha/Desktop/final_figures/raster_plot.png')
         plt.show()
 
 
@@ -589,8 +583,8 @@ plt.tight_layout()
 g.fig.suptitle("By trial", y=1.02)  # y controls vertical position
 
 plt.show()
-count_df.to_pickle("Desktop/clustering_data/trial_count.pkl")  
-trial_results_df.to_pickle("Desktop/clustering_data/trial_results.pkl")  
+count_df.to_pickle("/home/natasha/Desktop/clustering_data/trial_count.pkl")  
+trial_results_df.to_pickle("/home/natasha/Desktop/clustering_data/trial_results.pkl")  
 
 # ==============================================================================
 # Plot and test where every data point is a test session
@@ -600,7 +594,7 @@ session_count_df = summary_df.groupby(
     ['basename', 'cluster_num', 'event_position', 'taste_name']
 ).size().reset_index(name='movement_count')
 session_count_df['event_position'] = pd.Categorical(session_count_df['event_position'], categories=['before', 'after'], ordered=True)
-session_count_df.to_pickle("Desktop/clustering_data/session_counts.pkl") 
+session_count_df.to_pickle("/home/natasha/Desktop/clustering_data/session_counts.pkl") 
 session_results = []
 for _, row in unique_combinations.iterrows():
     cluster = row['cluster_num']
@@ -675,7 +669,7 @@ g.fig.suptitle("By session", y=1.02)  # y controls vertical position
 plt.show()
 
 
-session_results_df.to_pickle("Desktop/clustering_data/session_results.pkl")  
+session_results_df.to_pickle("/home/natasha/Desktop/clustering_data/session_results.pkl")  
 
 
 
@@ -685,7 +679,7 @@ session_results_df.to_pickle("Desktop/clustering_data/session_results.pkl")
 # Convert the summary data to a DataFrame
 summary_df = pd.DataFrame(summary_data)
 summary_df = summary_df[summary_df['cluster_num'] != -2.0] # REMOVE NO MOVEMENT
-summary_df.to_pickle("Desktop/clustering_data/summary_df.pkl")  
+summary_df.to_pickle("/home/natasha/Desktop/clustering_data/summary_df.pkl")  
 
 
 unique_combinations = summary_df[['cluster_num', 'taste_name', 'basename']].drop_duplicates()
@@ -1559,7 +1553,8 @@ for session in df.session_ind.unique():
     scaled_mtm_session = StandardScaler().fit_transform(mtm_session_features)  # Scale features
     embedding = reducer.fit_transform(scaled_mtm_session)  # UMAP embedding
     
-    sns.displot(embedding[:, 0], embedding[:, 1], hue= )
+    # NOT SURE IF THE CODE BELOW WORKS
+    scatter = sns.displot(embedding[:, 0], embedding[:, 1])
     #scatter = plt.scatter(embedding[:, 0], embedding[:, 1])
     plt.title(f'Session {session}: UMAP projection')
     cbar = plt.colorbar(scatter) 

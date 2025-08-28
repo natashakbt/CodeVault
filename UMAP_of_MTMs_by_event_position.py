@@ -177,31 +177,6 @@ for i in tqdm(range(len(expanded_df))):
             row['time_from_trial_start'] = (segment_bounds[0] - window_start, 2 * window_len)
             row['segment_raw'] = row['segment_raw'][:cut_idx]
             rows.append(row)
-
-        '''
-        # Append wavelength with adjusted start/stops if wavelength is within the window
-        if window_start <= segment_bounds[0] <= window_end and window_start <= segment_bounds[1] <= window_end:
-            new_row = row.copy()  # Copy row to modify it safely
-            new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, segment_bounds[1] - window_start) # Alter segment time to be from trial start
-            rows.append(new_row)
-        # Adjust wavelength stop time if ends after the window
-        elif window_start <= segment_bounds[1] <= window_end:
-            new_row = row.copy()
-            new_row['segment_bounds'] = (window_start, segment_bounds[1])
-            new_row['time_from_trial_start'] = (0, segment_bounds[1] - window_start)
-            cut_idx = window_start - segment_bounds[0]
-            new_row['segment_raw'] = row['segment_raw'][cut_idx:]
-            rows.append(new_row)
-        # Adjust wavelength start time if it starts before the window
-        elif window_start <= segment_bounds[0] <= window_end:
-            new_row = row.copy()
-            new_row['segment_bounds'] = (segment_bounds[0], window_end)
-            new_row['time_from_trial_start'] = (segment_bounds[0] - window_start, window_len*2)
-            cut_idx = window_end - segment_bounds[0]
-            new_row['segment_raw'] = row['segment_raw'][:cut_idx]
-            rows.append(new_row)
-        '''
-
             
 # Create a DataFrame from the list of rows
 transition_events_df = pd.DataFrame(rows).reset_index(drop=True)
@@ -240,9 +215,8 @@ files = glob.glob(os.path.join(fig_dir, '*'))
 for file in files:
     os.remove(file)  # Remove each file
 
-
 p_val_dict = {}
-n_iterations = 10 # Using 10 iterations
+n_iterations = 10 # Suggest using 10 iterations
 
 unique_sessions = transition_events_df['basename'].unique()
 for n in tqdm(range(n_iterations)):
@@ -306,7 +280,7 @@ for n in tqdm(range(n_iterations)):
         
         '''
         if n == 0:
-            # For Abu: Does this plot the difference between after and before?
+            # Extra plots to show the 'before' vs 'after' distributions subtractions
             plt.clf()
             plt.contourf(ha[1][:-1], ha[2][:-1], h_result); plt.colorbar() 
             plt.show()
@@ -333,19 +307,7 @@ for n in tqdm(range(n_iterations)):
             fig_path = os.path.join(fig_dir, f'{basename}_smooth_difference.png')
             plt.savefig(fig_path)
         '''
-        # chi2_statistic, p_value = chisquare(
-        #     hresult_flat,
-        #     f_exp = np.ones(len(hresult_flat)*1e-6)
-        #     )
-        
-        # chi2_statistic, p_value = power_divergence(
-        #     hresult_flat,
-        #     f_exp = np.zeros(len(hresult_flat))
-        #     )
-    
-        #print("Chi-square statistic:", chi2_statistic)
-        #print("P-value:", p_value)
-        
+
         n_boot = 1000
         sh_stat = []
         merged_df = pd.concat([before_values, after_values], axis = 0)
@@ -414,7 +376,7 @@ plot_df = plot_df.sort_values(['rat', 'basename']).reset_index(drop=True)
 session_map = {s: i for i, s in enumerate(plot_df['session'].unique(), start=1)}
 plot_df['session_id'] = plot_df['session'].map(session_map)
 
-# %%
+# %% Save UMAP data for plotting/stats
 
 desktop_path = os.path.expanduser("~/Desktop/clustering_data/UMAP_of_all_MTMs_plot_df.pkl")
 
@@ -423,76 +385,3 @@ plot_df.to_pickle(desktop_path)
 
 print(f"Saved plot_df as a pickle file to {desktop_path}")
 
-
-
-# %% UMAP of all MTM features
-# ==============================================================================
-# UMAP of all MTM features
-# ==============================================================================
-
-all_mtm_df = transition_events_df[transition_events_df['event_type'] == 'MTMs']
-all_mtm_features = np.stack(all_mtm_df.features.values)
-all_mtm_df = all_mtm_df.reset_index(drop=True)
-
-
-reducer = umap.UMAP()
-all_scaled_mtm_features = StandardScaler().fit_transform(all_mtm_features) # Scale features
-all_embedding = reducer.fit_transform(all_scaled_mtm_features) # UMAP embedding
-
-
-all_embedding_df = pd.DataFrame({
-    'x': all_embedding[:, 0],
-    'y': all_embedding[:, 1],
-    'event_position': all_mtm_df['event_position'].values
-})
-
-
-sns.displot(
-    data=all_embedding_df,
-    x='x',
-    y='y',
-    hue='event_position',
-    kind='kde',
-    height=6,
-    aspect=1
-)
-plt.show()
-
-
-# ==============================================================================
-# %% UMAP of MTM features by sessions
-# ==============================================================================
-
-
-for basename in unique_sessions:
-
-    session_mtm_df = transition_events_df[(transition_events_df['event_type'] == 'MTMs') & 
-                                          (transition_events_df['basename'] == basename)]
-    session_mtm_features = np.stack(session_mtm_df.features.values)
-    session_mtm_df = session_mtm_df.reset_index(drop=True)
-    
-    
-    reducer = umap.UMAP()
-    session_scaled_mtm_features = StandardScaler().fit_transform(session_mtm_features) # Scale features
-    session_embedding = reducer.fit_transform(session_scaled_mtm_features) # UMAP embedding
-    
-    
-    session_embedding_df = pd.DataFrame({
-        'x': session_embedding[:, 0],
-        'y': session_embedding[:, 1],
-        'event_position': session_mtm_df['event_position'].values
-    })
-    
-    
-    sns.displot(
-        data=session_embedding_df,
-        x='x',
-        y='y',
-        hue='event_position',
-        kind='kde',
-        height=6,
-        aspect=1
-    )
-    plt.title(basename)
-    
-    plt.show()

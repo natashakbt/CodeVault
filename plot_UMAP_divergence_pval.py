@@ -11,6 +11,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
 import random
+from scipy.stats import wilcoxon
 
 dirname = '/home/natasha/Desktop/clustering_data/'
 file_path = os.path.join(dirname, 'UMAP_of_all_MTMs_plot_df.pkl') # all events from classifier predictions
@@ -18,11 +19,11 @@ plot_df = pd.read_pickle(file_path)
 
 
 
-desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+desktop_path = os.path.join(os.path.expanduser("~"), "Desktop/final_figures")
 save_path = os.path.join(desktop_path, "divergence_pvalues_plot.svg")
 
 
-#%%
+# %% Plot
 
 # Get axis
 fig, ax = plt.subplots(figsize=(12, 9))
@@ -41,24 +42,16 @@ sns.boxplot(
     data=plot_df,
     x='session_id', y='divergence_p',
     fill=True, color='white', linewidth=2.5, width=.5,
-    showfliers=False, ax=ax
+    showfliers=False, 
+    ax=ax
 )
-'''
-# Set palette and add background colors by rat
-rat_colors = {
-    rat: color for rat, color in zip(
-        plot_df['rat'].unique(),
-        sns.color_palette("rainbow", n_colors=plot_df['rat'].nunique())
-    )
-}
-'''
 
+# Add rainbow background rectangles 
+# Find colors in rainbow palette and shuffle so it's not a smooth gradient
 rats = sorted(plot_df['rat'].unique())  # stable order of rats
 palette = sns.color_palette("rainbow", n_colors=len(rats))
-
 random.seed(55)  # ensures consistent shuffle every run
 random.shuffle(palette)
-
 rat_colors = {rat: color for rat, color in zip(rats, palette)}
 
 # Map session_id to its actual x-axis position
@@ -81,20 +74,30 @@ for rat, group in plot_df.groupby('rat'):
             zorder=0
         )
     )
-# Horizontal line
+# Horizontal line at p = 0.05
 ax.axhline(y=0.05, color='red', linestyle='--', linewidth=4, label='p = 0.05')
 
 # Labels & formatting
 ax.set_title("Divergence P-values by Session")
 ax.set_ylabel("P-value", fontsize=18, labelpad=10)
-#ax.set_ylim(-0.002, 0.08)
 ax.set_xlabel("session_id", fontsize=18, labelpad=10)
-#ax.set_xticks(plot_df['session_id'].unique())
-#ax.set_xticklabels(plot_df['session_id'], rotation=45, fontsize=14)
 ax.tick_params(axis='y', labelsize=14)
 
 # Save
 plt.savefig(save_path, format='svg', bbox_inches='tight')
 plt.show()
 
+# %% Wilcoxon stats
+results = []
+
+for session_id, group in plot_df.groupby("session_id"):
+    try:
+        stat, p = wilcoxon(group["divergence_p"] - 0.05, alternative="less")
+        results.append({"session_id": session_id, "stat": stat, "pval": p})
+    except ValueError:
+        # happens if group has too few values or all values == 0.05
+        results.append({"session_id": session_id, "stat": None, "pval": None})
+
+results_df = pd.DataFrame(results)
+print(results_df)
 

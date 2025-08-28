@@ -50,7 +50,7 @@ for filename in os.listdir(NM_dirpath):
                 # Keep only the relevant columns
                 metadata_cols = metadata_df[['taste_rel_trial_num', 'dig_in_num_taste', 
                                              'taste_name', 'laser_duration_ms', 'laser_lag_ms']].drop_duplicates()
-                
+                '''
                 # Merge metadata into new_df based on 'taste_rel_trial_num'
                 new_df = pd.merge(
                     new_df,
@@ -60,6 +60,16 @@ for filename in os.listdir(NM_dirpath):
                     how='left'
                 )
                 new_df = new_df.drop(columns=['taste_rel_trial_num'])
+                '''
+                new_df = pd.merge(
+                    new_df,
+                    metadata_df[['taste_rel_trial_num', 'dig_in_num_taste', 
+                                 'laser_duration_ms', 'laser_lag_ms', 'taste_name']],
+                    left_on=['trial', 'taste'],
+                    right_on=['taste_rel_trial_num', 'dig_in_num_taste'],
+                    how='left'
+                )
+                new_df = new_df.drop(columns=['taste_rel_trial_num', 'dig_in_num_taste'])
             except Exception as e:
                 print(f"Error reading metadata CSV for {metadata_path}: {e}")
                 
@@ -88,3 +98,4 @@ output_file_path = os.path.join(dirname, 'all_datasets_emg_pred-TEST.pkl')
 df.to_pickle(output_file_path)
 
 print(f"DataFrame successfully saved to {output_file_path}")
+

@@ -78,6 +78,8 @@ for index, row in mtm_df_all.iterrows():
         ax_corr.plot(pos_corr)
     ax_corr.plot(corr_peaks, pos_corr[corr_peaks], "x", markersize=20)
     '''
+perc_multimodal = len(multi_segments)/(len(multi_segments) + len(uni_segments))*100
+print(f"Percent of multimodal waveforms removed of MTMs: {perc_multimodal}")
 
 # ==============================================================================
 # %% Overerwrite data file with new dataframe without multimodal segments
