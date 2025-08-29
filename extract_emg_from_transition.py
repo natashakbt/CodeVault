@@ -26,7 +26,7 @@ import scipy.stats as stats
 from tqdm import tqdm
 import matplotlib.gridspec as gridspec
 from scipy.stats import norm
-
+import matplotlib as mpl
 
 # ==============================================================================
 # Load data and get setup
@@ -456,6 +456,7 @@ sig_results = session_trial_results_df[session_trial_results_df['poisson_pvalue'
 for _, row in sig_results.iterrows():
     print(f"{row['basename']}: {row['taste']} (cluster {row['cluster_num']})")
 
+
 # -------------------------------
 # Plot: violin plots per session
 # -------------------------------
@@ -463,31 +464,38 @@ output_dir = os.path.join(dirname, 'session_analysis')
 os.makedirs(output_dir, exist_ok=True)
 
 unique_basenames = count_df['basename'].unique()
+#unique_basenames = 'nb34_test3_4tastes_240209_123329'
+# Define custom colors
+custom_palette = {
+    'before': '#a6cee3',  # 
+    'after': '#b2df84'    #
+}
+
 
 for basename in tqdm(unique_basenames):
     subset = count_df[count_df['basename'] == basename]
 
-    g = sns.FacetGrid(subset, row='cluster_num', col='taste_name', margin_titles=True, sharey=False)
+    g = sns.FacetGrid(subset, row='taste_name', col='cluster_num', margin_titles=True, sharey=False)
     g.map_dataframe(
         sns.violinplot,
         x='event_position',
         y='movement_count',
         hue='event_position',
-        palette='pastel',
+        palette=custom_palette,
         legend=False
     )
 
     # Annotate p-values and trial counts
     for (row_val, col_val), ax in g.axes_dict.items():
         subsub = subset[
-            (subset['cluster_num'] == row_val) &
-            (subset['taste_name'] == col_val)
+            (subset['cluster_num'] == col_val) &
+            (subset['taste_name'] == row_val)
         ]
         basename_val = subset['basename'].iloc[0]
 
         res_row = session_trial_results_df[
-            (session_trial_results_df['cluster_num'] == row_val) &
-            (session_trial_results_df['taste'] == col_val) &
+            (session_trial_results_df['cluster_num'] == col_val) &
+            (session_trial_results_df['taste'] == row_val) &
             (session_trial_results_df['basename'] == basename_val)
         ]
 
@@ -506,11 +514,87 @@ for basename in tqdm(unique_basenames):
     safe_basename = basename.replace('/', '_')
     filepath = os.path.join(output_dir, f"{safe_basename}_violin.png")
     g.savefig(filepath)
-    if basename == 'nb34_test3_4tastes_240209_123329':
-        plt.savefig(f"/home/natasha/Desktop/final_figures/{safe_basename}_violinplot.svg", format="svg")
-        plt.savefig(f"/home/natasha/Desktop/final_figures/{safe_basename}_violinplot.png", format="png")
     plt.close(g.fig)
+    #plt.show()
 
+# %%
+
+subset_filtered = count_df[(count_df['basename'] == 'nb34_test1_4tastes_240207_131427') &
+                           (count_df['taste_name'].isin(['qhcl', 'suc']))]
+
+g = sns.FacetGrid(subset_filtered, row='taste_name', col='cluster_num', margin_titles=True, sharey=True)
+g.map_dataframe(
+    sns.violinplot,
+    x='event_position',
+    y='movement_count',
+    hue='event_position',
+    palette=custom_palette,
+    legend=False
+)
+
+for (row_val, col_val), ax in g.axes_dict.items():
+    subsub = subset_filtered[
+        (subset_filtered['cluster_num'] == col_val) &
+        (subset_filtered['taste_name'] == row_val)
+    ]
+    basename_val = subset_filtered['basename'].iloc[0]
+
+    res_row = session_trial_results_df[
+        (session_trial_results_df['cluster_num'] == col_val) &
+        (session_trial_results_df['taste'].isin(['qhcl', 'suc'])) &
+        (session_trial_results_df['basename'] == basename_val) &
+        (session_trial_results_df['taste'] == row_val)
+    ]
+
+    if len(res_row) == 0:
+        label = "No data"
+        ax.text(0.05, 0.95, label, transform=ax.transAxes,
+                ha='left', va='top', fontsize=8,
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='gray', alpha=0.7))
+    else:
+        pval = res_row['poisson_pvalue'].iloc[0]
+       
+        if pval < 0.001:
+            sig_label = '***'
+        elif pval < 0.01:
+            sig_label = '**'
+        elif pval < 0.05:
+            sig_label = '*'
+        else:
+            sig_label = 'ns'
+
+        if pval < 0.05:
+            y_bar = 6      # fixed bar height
+            y_text = 6.2   # text slightly above the bar
+        
+            ax.plot([0, 0, 1, 1], [y_bar, y_bar, y_bar, y_bar],
+                    lw=1.2, c='black')
+            ax.text(0.5, y_text, sig_label, ha='center', va='bottom', fontsize=10)
+
+            
+# Remove x-axis tick labels for all subplots
+for ax in g.axes.flat:
+    ax.set_xticklabels(['Before', "After"])  # remove tick labels
+    ax.set_xlabel('')       # remove per-axis label
+    #ax.set_title(['Gapes', "Subtype #1", "Subtype #2", "Subtype #3"])
+
+custom_titles = ['', "MTM #1", "MTM #2", "MTM #3"]
+for ax, title in zip(g.axes[0], custom_titles):
+    ax.set_title(title)
+    
+# Add one shared x-axis label at the bottom
+g.fig.text(0.625, 1.02, "Mouth or Tongue Movements (MTMs)", ha='center', fontsize=12)
+g.fig.text(0.15, 1.02, "Gapes", ha='center', fontsize=12)
+
+#g.fig.suptitle(f'Basename: {basename}', y=1.02)
+
+safe_basename = basename.replace('/', '_')
+plt.savefig(f"/home/natasha/Desktop/final_figures/{safe_basename}_violinplot.svg", format="svg", bbox_inches="tight", dpi=300)
+plt.savefig(f"/home/natasha/Desktop/final_figures/{safe_basename}_violinplot.png", format="png", bbox_inches="tight", dpi=300)
+
+plt.show()
+
+    
 # %% PLOT: REAL P-VALUE DISTRIBUTION AGAINST RANDOMIZED DATA
 
 # -------------------------------
@@ -548,7 +632,7 @@ plt.bar(
     bin_centers,
     mean_counts,
     width=binwidth * 0.9,
-    color="pink",
+    color="moccasin",
     alpha=0.7,
     label="Random Mean (±SE)"
 )
@@ -611,28 +695,59 @@ summary_df['annot'] = summary_df.apply(
 )
 annot_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='annot')[taste_order]
 
-# Step 4: plot the heatmap
+
+
+norm = mpl.colors.Normalize(vmin=0, vmax=0.67)  # cap color scale
+
 plt.figure(figsize=(10, 6))
-sns.heatmap(
+ax = sns.heatmap(
     proportion_matrix,
     annot=annot_matrix,
-    fmt='',  # Since annotations are strings
+    fmt='',
     cmap='viridis',
-    vmin=0,
-    vmax=1,
+    norm=norm,
     cbar_kws={'label': 'Proportion Significant'},
-    linewidths=1,       # Thickness of the lines
-    linecolor='white'   # Color of the lines
+    linewidths=1,
+    linecolor='white'
 )
-plt.title("Proportion of Significant Results (Poisson)")
-plt.xlabel("Taste")
-plt.ylabel("Cluster Number")
+# Get axis limits
+xmin, xmax = ax.get_xlim()
+ymin, ymax = ax.get_ylim()
+
+# Which x positions to put long ticks (before QHCL=0, between CA/SUC=3, after WATER=7)
+special_positions = [0.01, 3, 5.99]
+
+for pos in special_positions:
+    ax.vlines(
+        x=pos, ymin=0, ymax=ymin+0.4,   # extend *below* the bottom
+        color='black', linewidth=1.2, clip_on=False
+    )
+# Add custom group labels under x-axis
+ax.text(1.5, ymin+0.3, "Aversive", ha='center', va='top',
+        fontsize=12, transform=ax.transData)
+ax.text(4.5, ymin+0.3, "Palatable", ha='center', va='top',
+        fontsize=12, transform=ax.transData)
+custom_xlabels = ["QHCl", "Dil-QHCl", "CA", "Sucrose", "NaCl", "Water"]
+ax.set_xticklabels(custom_xlabels, ha="center", fontsize=11)
+
+custom_ylabels = ["", "MTM #1", "MTM #2", "MTM #3"]
+ax.set_yticklabels(custom_ylabels, ha="center", fontsize=11)
+ax.text(-0.3, 0.5, "Gapes", va="center", ha="right", fontsize=12, rotation=90)
+ax.text(-0.3, 2.5, "Mouth or Tongue Movements (MTMs)", va="center", ha="right", fontsize=12, rotation=90)
+
+
+# Add a small gap line after row 0
+ymin, ymax = ax.get_ylim()
+gap_y = 1  # between row 0 and 1
+ax.hlines(gap_y, *ax.get_xlim(), color="white", linewidth=6)  # adjust linewidth
+
+#plt.title("Proportion of Significant Results (Poisson)")
+plt.xlabel("")
+plt.ylabel("")
 plt.tight_layout()
-plt.savefig("/home/natasha/Desktop/final_figures/pval_cluster_taste_matrix.svg", format="svg")
-plt.savefig("/home/natasha/Desktop/final_figures/pval_cluster_taste_matrix.png", format="png")
+plt.savefig("/home/natasha/Desktop/final_figures/pval_cluster_taste_matrix_withgap.svg", format="svg")
+plt.savefig("/home/natasha/Desktop/final_figures/pval_cluster_taste_matrix_withgap.png", format="png")
 plt.show()
-
-
 
 
 # %%
