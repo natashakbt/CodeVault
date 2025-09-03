@@ -75,6 +75,8 @@ print(f"The mode is: {mode_result[0]}")
 # Optimal # of cluster histogram
 rounded_numbers = [round(num) for num in optimal_cluster_list]
 #plt.hist(optimal_cluster_list, bins=len(n_components_range), 
+
+plt.figure(figsize=(6, 8))
 plt.hist(rounded_numbers,
          bins = np.arange(0, 16),
          color='0.8', 
@@ -83,12 +85,13 @@ plt.hist(rounded_numbers,
 plt.axvline(x=mode_result[0]+0.5, #add 0.5 to shift value because of bin sizes
             color='red', 
             linestyle='--', 
-            linewidth=3.5)
+            linewidth=3.5,
+            label='Mode')
 plt.xlabel('Optimal Number of Clusters')
 plt.ylabel('Frequency')
 plt.title(f'Frequency of Optimal Cluster Number ({iterations} iterations)')
 plt.xlim(0.5, 14.5)
-
+plt.legend()
 # Center ticks on each bar with correct labels
 plt.xticks(ticks=np.arange(0.5, 15.0, 1), labels=np.arange(0, 15))
 plt.savefig("/home/natasha/Desktop/final_figures/optimal_cluster_freq.svg", format="svg")  # Save before show

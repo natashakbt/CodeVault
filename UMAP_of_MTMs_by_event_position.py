@@ -216,7 +216,8 @@ for file in files:
     os.remove(file)  # Remove each file
 
 p_val_dict = {}
-n_iterations = 10 # Suggest using 10 iterations
+n_iterations = 1 # Suggest using 10 iterations
+
 
 unique_sessions = transition_events_df['basename'].unique()
 for n in tqdm(range(n_iterations)):
@@ -248,9 +249,48 @@ for n in tqdm(range(n_iterations)):
                 kind='kde',
                 height=6,
                 aspect=1,
-                palette={'before': '#e66101', 'after': '#5e3c99'}
+                palette={'before': '#16547e', 'after': '#33a02c'}
             )
+ 
+
+            # Access the underlying axes
+            ax = g.ax  # only works if it's a single plot
+            g.set_axis_labels("", "")
+            # Get axis limits
+            xmin, xmax = ax.get_xlim()
+            ymin, ymax = ax.get_ylim()
+            
+            # Remove all axes
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_frame_on(False)
+            
+            # Add two small reference lines in bottom-left corner
+            offset_x = (xmax - xmin) * 0.04
+            offset_y = (ymax - ymin) * 0.05
+            corner_x, corner_y = xmin + offset_x, ymin + offset_y
+            
+            line_length_x = (xmax - xmin) * 0.10
+            line_length_y = (ymax - ymin) * 0.10
+            
+            ax.plot([corner_x, corner_x + line_length_x], [corner_y, corner_y], color='k', lw=2)  # x-axis
+            ax.plot([corner_x, corner_x], [corner_y, corner_y + line_length_y], color='k', lw=2)  # y-axis
+            
+            # Add labels
+            ax.text(corner_x - (xmax - xmin)*0.04, corner_y + line_length_y / 2, 
+                    'UMAP 2', fontsize=16, ha='right', va='center', rotation='vertical')
+
+            ax.text(corner_x + line_length_x / 2, corner_y - (ymax - ymin)*0.03, 
+                    'UMAP 1', fontsize=16, ha='center', va='top')
+
+            # Replace legend labels and remove title
+            new_labels = ['Before', 'After']
+            for t, l in zip(g._legend.texts, new_labels):
+                t.set_text(l)
+            g._legend.set_title('')  # remove legend title
+            
             g.fig.suptitle(f'{basename}')
+            
             fig_path = os.path.join(fig_dir, f'{basename}_countour_plot.png')
             plt.savefig(fig_path)
             fig_path_svg = os.path.join(fig_dir, f'{basename}_countour_plot.svg')

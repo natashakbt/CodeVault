@@ -220,29 +220,71 @@ for session in tqdm(df.session_ind.unique()):
         '''
         if i == 0:
             
+            fig, ax = plt.subplots(figsize=(8, 6))
+            
             # Plot the UMAP projections with optimal GMM clusters, using the custom colormap
-            scatter = plt.scatter(embedding_umap[:, 0], embedding_umap[:, 1], c=labels, cmap=cmap, s=20)
-            plt.title(f'Session {session}: UMAP projection of PCA with GMM ({optimal_n_components} clusters)')
-            cbar = plt.colorbar(scatter)
-            cbar.set_ticks([])  # Set specific tick positions
+            scatter = ax.scatter(
+                embedding_umap[:, 0], embedding_umap[:, 1],
+                c=labels, cmap=cmap, s=45,
+                linewidths=0.5, edgecolor = 'black'
+            )
+            ax.set_title(f'Session {session}: UMAP projection of PCA with GMM ({optimal_n_components} clusters)')
+            
+            # Remove all axes
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_frame_on(False)
+            
+            # Add colorbar
+            cbar = plt.colorbar(scatter, ax=ax)
+            cbar.set_ticks([])  # remove ticks
+            
+            # --- Add inset reference axes in bottom-left corner ---
+            xmin, xmax = ax.get_xlim()
+            ymin, ymax = ax.get_ylim()
+            
+            offset_x = (xmax - xmin) * 0.04  # 4% inset from left
+            offset_y = (ymax - ymin) * 0.05  # 5% inset from bottom
+            corner_x, corner_y = xmin + offset_x, ymin + offset_y
+            
+            line_length_x = (xmax - xmin) * 0.10  # 10% of x-range
+            line_length_y = (ymax - ymin) * 0.10  # 10% of y-range
+            
+            # Plot mini-axes
+            ax.plot([corner_x, corner_x + line_length_x], [corner_y, corner_y], color='k', lw=4)  # x-axis
+            ax.plot([corner_x, corner_x], [corner_y, corner_y + line_length_y], color='k', lw=4)  # y-axis
+            
+            # Labels for mini-axes (with slight adjustments)
+            ax.text(corner_x + line_length_x / 2 + (xmax - xmin) * 0.02,   # shift right
+                    corner_y - (ymax - ymin) * 0.015,
+                    'UMAP 1', fontsize=16, ha='center', va='top')
+            
+            ax.text(corner_x - (xmax - xmin) * 0.015,
+                    corner_y + line_length_y / 2 + (ymax - ymin) * 0.02,   # shift up
+                    'UMAP 2', fontsize=16, ha='right', va='center', rotation='vertical')
+            # Save outputs
             umap_session_path_png = os.path.join(pca_dir, f'session_{session}_umap-of-PCA.png')
             plt.savefig(umap_session_path_png)
             umap_session_path_svg = os.path.join(pca_dir, f'session_{session}_umap-of-PCA.svg')
             plt.savefig(umap_session_path_svg)
             plt.clf()
-            
+
+
             if np.isnan(fixed_cluster_num):
                 # Plot the BIC values, linear regressions, and breakpoint with confidence intervals
-                pw_fit.plot_fit(color="red", linewidth=1)
-                pw_fit.plot_data(marker = 'o', s = 60)
-                pw_fit.plot_breakpoints()
-                pw_fit.plot_breakpoint_confidence_intervals()
+                plt.figure(figsize=(10, 6))  # adjust width, height in inches
+
+                pw_fit.plot_fit(color="black", linewidth=3)
+                pw_fit.plot_data(color="gray", marker = 'o', s = 100)
+                pw_fit.plot_breakpoints(color="red", linestyle = '--', linewidth=3.5)
+                pw_fit.plot_breakpoint_confidence_intervals(color = "red")
+                plt.gca().set_yticklabels([])
                 plt.xlabel('Number of clusters')
-                plt.ylabel('BIC Score')
+                plt.ylabel('BIC Score (a.u.)')
                 plt.title(f'Session {session}: BIC Scores. Elbow at {round(breakpoint1,3)}')
                 bic_session_path_png = os.path.join(pca_dir, f'session_{session}_bic.png')
                 plt.savefig(bic_session_path_png)
-                bic_session_path_svg = os.path.join(pca_dir, f'session_{session}_bic.png')
+                bic_session_path_svg = os.path.join(pca_dir, f'session_{session}_bic.svg')
                 plt.savefig(bic_session_path_svg)
                 plt.clf()
             
@@ -263,40 +305,11 @@ for session in tqdm(df.session_ind.unique()):
             plt.savefig(mahal_session_path_svg)
             plt.clf()
       '''
-### TODO:
-    # MAHALANOBIS ONLY WORHT DOING IF FIXED CLUSTER NUM
-    # DISTRIBUTION PLOTS ONLY WORTH DOING IF VARIABLE CLUSTER NUM
-    
+
 # %%
 # ==============================================================================
-# MAHALANOBIS DISTANCE + stats
+# Save clustering results (for future stats, not the assignments, that's next)
 # ==============================================================================      
-
-# TODO: FIGURE OUT HOW TO MOVE PLOTTING CODE INTO mahalanobis_test_script
-## Histogram of mahalanobis diagonal vs non-diag values
-bin_edges = np.linspace(min(mahal_matrix.flatten()), max(mahal_matrix.flatten()), num=31)  # 20 bins
-
-plt.hist(diag_elements, bins=bin_edges, 
-         color='gray', 
-         edgecolor='black', 
-         alpha=1,  # Transparency for the first histogram
-         label='Diagonal Elements')  # Add a label
-
-plt.hist(non_diag_elements, bins=bin_edges, 
-         color='pink', 
-         edgecolor='black', 
-         alpha=0.5, 
-         label='Non-Diagonal Elements')
-
-plt.xlabel('Values')
-plt.ylabel('Frequency')
-plt.title(f'Frequency Distribution ({iterations} iterations)')
-plt.legend()  # Show the legend for clarity
-png_mah_plot = os.path.join(clust_dir, 'diagonal_freq_dist.png')
-svg_mah_plot = os.path.join(clust_dir, 'diagonal_freq_dist.svg')
-plt.savefig(png_mah_plot)
-plt.savefig(svg_mah_plot)
-plt.show()
 
 if fixed_cluster_num == 3:
     # Data to save

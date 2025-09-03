@@ -87,7 +87,7 @@ def convert_taste_num_to_name(basename, taste_num, df):
         return None
 
 
-# %% GETTING ALL EVENTS WITHIN THE TRANSITION WINDOW
+# %% GETTING ALL EVENTS WITHIN THE TRANSITION WINDOW - Important setup
 # ==============================================================================
 # Create DataFrame that only contains events that are whithin the transition window
 # ==============================================================================
@@ -440,7 +440,7 @@ for _, combo in unique_combinations.iterrows():
         'taste': taste,
         'cluster_num': cluster,
         'n_trials': num_trials,
-        #'ttest_pvalue': t_pval,
+        'poisson_stat': res.statistic,
         'poisson_pvalue': res.pvalue,
         'sig_status': sig_status
     })
@@ -517,7 +517,7 @@ for basename in tqdm(unique_basenames):
     plt.close(g.fig)
     #plt.show()
 
-# %%
+# %% SAME PLOTTING AS ABOVE, BUT FOR ONE EXAMPLE ONLY - GOOD FOR PUBLICATION
 
 subset_filtered = count_df[(count_df['basename'] == 'nb34_test1_4tastes_240207_131427') &
                            (count_df['taste_name'].isin(['qhcl', 'suc']))]
@@ -545,7 +545,10 @@ for (row_val, col_val), ax in g.axes_dict.items():
         (session_trial_results_df['basename'] == basename_val) &
         (session_trial_results_df['taste'] == row_val)
     ]
-
+    pvalue_for_now = res_row['poisson_pvalue']
+    stat_for_now = res_row['poisson_stat']
+    print(f'{row_val} {col_val}: {pvalue_for_now} and {stat_for_now}')
+    print('/n')
     if len(res_row) == 0:
         label = "No data"
         ax.text(0.05, 0.95, label, transform=ax.transAxes,
@@ -661,6 +664,8 @@ plt.show()
 # -------------------------------
 # Statistics
 # -------------------------------
+
+
 counts, bin_edges = np.histogram(
     session_trial_results_df["poisson_pvalue"], 
     bins=np.arange(0, 1+binwidth, binwidth)  # same bins as the plot
@@ -670,6 +675,18 @@ first_bin_count = counts[0] # real count of how many significant test there are
 
 p_right = norm.sf(first_bin_count, loc=mean_counts[0], scale=se_counts[0])
 print(f'p-value that there is a greater number of significant session that by chance {p_right}')
+
+
+## TODO: CHANGE ABOVE TO BINOMIAL TEST
+
+ks_stats = stats.kstest(counts, mean_counts)
+
+if ks_stats.pvalue < 0.05:
+    print("Diagonal distances statistically different from non-diagonal")
+    print(f"pvalue: {ks_stats.pvalue}, KS Statistic (D): {ks_stats.statistic}")
+else:
+    print("Warning: diagonal distances NOT statistically different from non-diagonal")
+
 
 # %% TASTANT x MOVEMENT MATRIX OF PROPORTION OF SIGNIFICANT P-VALUES
 

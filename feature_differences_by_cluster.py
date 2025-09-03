@@ -251,7 +251,7 @@ subset_df = waveform_metrics_df[waveform_metrics_df['cluster_num'].isin([0, 1, 2
 
 # Kruskal-wallis test
 results = []
-for metric in new_columns:
+for metric in tqdm(new_columns):
     # Group values by true_label
     groups = [subset_df[subset_df['cluster_num'] == label][metric] for label in [0, 1, 2]]
     
@@ -306,7 +306,7 @@ for metric in new_columns:
         print(f'{feature} not significant ({p_value})')
         effect_size = 'n/a'
     print('\n')
-    feature_results.loc[len(feature_results)] = [metric, h_stat, p_value, epsilon_squared, effect_size]
+    feature_results.loc[len(feature_results)] = [metric, H, p, epsilon_squared, effect_size]
 
 # %% Save statistical results
 feature_results.to_csv('/home/natasha/Desktop/clustering_data/feature_results.csv', index=False)
