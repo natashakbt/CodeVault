@@ -25,11 +25,7 @@ from scipy.stats import ttest_rel
 import scipy.stats as stats
 from tqdm import tqdm
 import matplotlib.gridspec as gridspec
-from scipy.stats import norm
-import matplotlib as mpl
-
-
-### NEWER VERSION IN AUTOSAVE CACHE??????
+from scipy.stats import chisquare
 
 # ==============================================================================
 # Load data and get setup
@@ -90,7 +86,7 @@ def convert_taste_num_to_name(basename, taste_num, df):
         return None
 
 
-# %% GETTING ALL EVENTS WITHIN THE TRANSITION WINDOW - Important setup
+# %% GETTING ALL EVENTS WITHIN THE TRANSITION WINDOW
 # ==============================================================================
 # Create DataFrame that only contains events that are whithin the transition window
 # ==============================================================================
@@ -216,6 +212,107 @@ for (basename, taste_name, trial_num), group in tqdm(grouped):
     plt.close()
 
 
+# %% BEHAVIOR RASTER PLOT - ALL CLUSTERS ON - OLD CODE; DO NOT USE
+# NEED TO RUN THIS TO BUILD SUMMARY_DF
+# ==============================================================================
+# Raster plot of events around the transition, 1 plot per session per taste
+# ==============================================================================
+'''
+# Create and clear folder directory for figures
+clust_dir = os.path.join(dirname, 'cluster_raster_transition')
+os.makedirs(clust_dir, exist_ok=True)
+files = glob.glob(os.path.join(clust_dir, '*'))
+for file in files:
+    os.remove(file)
+
+# Initialize an empty list to store the rows for the final dictionary
+summary_data = []
+
+# Group by basename (session) and taste
+grouped = transition_events_df.groupby(['basename', 'taste_num'])
+
+# Create a figure and populate the dictionary
+for basename, taste_group in grouped:
+
+    taste = basename[1]
+    basename = basename[0]
+
+    # Create a subplot for each taste_num
+    num_tastes = len(taste_group['taste_name'].unique())
+    fig, axs = plt.subplots(nrows=num_tastes, figsize=(8, 10), sharex=True, sharey=True)
+    
+    # Ensure axs is always treated as an iterable
+    if num_tastes == 1:
+        axs = [axs]  # Make axs a list if there's only one subplot
+
+    for ax, (taste, trial_group) in zip(axs, taste_group.groupby('taste_num')):
+        ax.set_title(f"Taste: {taste_num}")
+
+        # Collect all cluster_num values for the current taste and trial
+        all_cluster_nums = []
+
+        # Loop through each trial and plot it as a block along time
+        for trial, trial_data in trial_group.groupby('trial_num'):
+            if math.isnan(fixed_transition_time):
+                transition_time_point = expanded_df.loc[
+                    (expanded_df['trial_num'] == trial) & 
+                    (expanded_df['taste_num'] == str(taste)) & 
+                    (expanded_df['basename'] == basename), 
+                    'scaled_mode_tau'
+                ].values[0]
+            else:
+                transition_time_point = fixed_transition_time # to align to fixed palatability transition
+            
+            # Dictionary to store before/after counts for this trial
+            trial_summary = {}
+
+            for _, row in trial_data.iterrows():
+                # Set the color using the color mapping based on cluster_num
+                cluster_num = row['cluster_num']
+                color = color_mapping.get(cluster_num, 'black')  # Default to 'black' if cluster_num not found
+                
+                # Add cluster_num to the list
+                all_cluster_nums.append(cluster_num)
+
+                # Plot each trial as a block
+                segment_bounds = row['segment_bounds']
+                ax.fill_between([segment_bounds[0] - transition_time_point, segment_bounds[1] - transition_time_point], 
+                                trial - 0.5, trial + 0.5, color=color)
+                
+                # Check if the event occurred before or after the transition
+                event_position = "before" if segment_bounds[1] < transition_time_point else "after"
+                
+                
+                #taste_name = convert_taste_num_to_name(basename, taste_num, lookup_df)
+                taste_name = trial_data['taste_name'].iloc[0]
+                
+                # Add to the summary_data list
+                summary_data.append({
+                    'basename': basename,
+                    'taste_num': taste_num,
+                    'cluster_num': cluster_num,
+                    'event_position': event_position,
+                    'trial': trial_num,
+                    'taste_name': taste_name
+                })
+
+            # Set x-axis limits centered around the transition time
+            ax.set_xlim([-(window_len), window_len])  # Set limits from -500 to 500 ms
+            ax.axvline(0, color='k', linestyle='--')  # Add a vertical line at transition time (0 ms)
+
+        ax.set_ylabel(f'Trial {trial_num}')
+        ax.set_xlabel('Time (ms)')
+
+        # Print the vector of all cluster_num values for this trial group
+        print(f"Taste: {taste_name}, Basename: {basename}:")
+
+    plt.suptitle(f'{basename}')
+    plt.tight_layout()
+    clust_all_path = os.path.join(clust_dir, f'{taste_name}_{basename}_cluster_raster.png')
+    plt.savefig(clust_all_path)
+    plt.clf()
+
+'''
 
 # %% BEHAVIOR RASTER PLOT - ALL CLUSTERS ON - NEED TO RUN FOR STATS LATER
 # NEED TO RUN THIS TO BUILD SUMMARY_DF
@@ -284,76 +381,44 @@ for (basename, taste_name), taste_group in tqdm(grouped):
 # ==============================================================================
 # Raster plot of events around the transition, 1 plot per session per taste
 # ==============================================================================
+
+desired_clust_to_plot = 1 # which cluster_num to plot?
+
+# Clear and create folder directory
 single_clust_dir = os.path.join(dirname, 'single_cluster_raster_transition')
 os.makedirs(single_clust_dir, exist_ok=True)
-files = glob.glob(os.path.join(single_clust_dir, '*'))
-for file in files:
+for file in glob.glob(os.path.join(single_clust_dir, '*')):
     os.remove(file)
-    
-desired_clust_to_plot = 1 # which cluster_num to plot?
 
 # Group by basename (session) and taste
 grouped = transition_events_df.groupby(['basename', 'taste_num'])
 
 for (basename, taste), taste_group in grouped:
-    transition_time_point = fixed_transition_time
-    behaviors_to_plot_this_round = taste_group[taste_group['cluster_num'] == desired_clust_to_plot]
-    behaviors_to_plot_this_round = behaviors_to_plot_this_round[behaviors_to_plot_this_round['taste_num'] == taste]
-    behaviors_to_plot_this_round = behaviors_to_plot_this_round.drop_duplicates(subset=['segment_bounds'])
-    
-    
-    fig = plt.figure(figsize=(10, 10))
-    gs = gridspec.GridSpec(2, 1, height_ratios=[1, 3], hspace=0.05)
+    fig, ax = plt.subplots(figsize=(10, 8))
+    taste_name = convert_taste_num_to_name(basename, taste, df)
+    ax.set_title(f"Taste: {taste_name}")
 
-    # =========================
-    # Top panel: raw count frequency
-    # =========================
-    ax_freq = fig.add_subplot(gs[0])
-    time_bins = np.linspace(-window_len, window_len, 1000)
-    freq_trace = np.zeros_like(time_bins, dtype=float)
-    
-    for _, row in behaviors_to_plot_this_round.iterrows():
-        segment_bounds = row['segment_bounds']
-        start = segment_bounds[0] - transition_time_point
-        end = segment_bounds[1] - transition_time_point
+    for trial, trial_data in taste_group.groupby('trial_num'):
+        transition_time_point = fixed_transition_time
 
-        # Add 1 to all bins where the behavior is active
-        freq_trace += ((time_bins >= start) & (time_bins <= end)).astype(float)
-    window_size = 20  # adjust for more/less smoothing
-    freq_trace_smoothed = np.convolve(freq_trace, np.ones(window_size)/window_size, mode='same')
-    ax_freq.step(time_bins, freq_trace_smoothed, color='black', linewidth=2, where='mid')
-    # Step plot for exact counts
-    #ax_freq.step(time_bins, freq_trace, color='black', linewidth=2, where='mid')
-    ax_freq.axvline(0, color='k', linestyle='--')
-    ax_freq.set_xlim([-window_len, window_len])
-    ax_freq.set_ylabel('Frequency')
-    ax_freq.set_xticklabels([])  # hide x-axis labels
-    #ax_freq.set_title(f"Taste: {convert_taste_num_to_name(basename, taste, df)}")
+        for _, row in trial_data.iterrows():
+            cluster_num = row['cluster_num']
+            if cluster_num != desired_clust_to_plot:
+                continue
 
+            segment_bounds = row['segment_bounds']
+            start = segment_bounds[0] - transition_time_point
+            end = segment_bounds[1] - transition_time_point
+            ax.hlines(y=trial, xmin=start, xmax=end,
+                      color=color_mapping.get(cluster_num, 'black'), linewidth=8)
 
-    # =========================
-    # Bottom panel: raster plot
-    # =========================
-    ax_raster = fig.add_subplot(gs[1])
-
-    for _, row in behaviors_to_plot_this_round.iterrows():
-        trial_num = row['trial_num']
-        segment_bounds = row['segment_bounds']
-        start = segment_bounds[0] - transition_time_point
-        end = segment_bounds[1] - transition_time_point
-        
-        ax_raster.hlines(y=trial_num, xmin=start, xmax=end,
-                         color=color_mapping.get(desired_clust_to_plot, 'black'), linewidth=8)
-    ax_raster.set_xlim([-window_len, window_len])
-    ax_raster.axvline(0, color='k', linestyle='--')
-    ax_raster.set_ylabel('Trial')
-    ax_raster.set_xlabel('Time (ms)')
-
+    ax.set_xlim([-(window_len), window_len])
+    ax.axvline(0, color='k', linestyle='--')
+    ax.set_ylabel('Trial')
+    ax.set_xlabel('Time (ms)')
     plt.suptitle(f'{basename}')
-    if basename == 'nb32_test2_4tastes_240203_121309' and taste == 1:
-        plt.savefig('/home/natasha/Desktop/final_figures/raster_plot.svg')
-        plt.savefig('/home/natasha/Desktop/final_figures/raster_plot.png')
-        plt.show()
+
+    plt.tight_layout()
     png_path = os.path.join(single_clust_dir, f"{taste_name}_{basename}_transitions.png")
     svg_path = os.path.join(single_clust_dir, f"{taste_name}_{basename}_transitions.svg")
     plt.savefig(png_path)
@@ -362,11 +427,267 @@ for (basename, taste), taste_group in grouped:
 
 
 
+# %% WHY ISN'T THIS WORKING
+# ==============================================================================
+# WHY ISN'T THIS WORKING
+# ==============================================================================
+
+desired_clust_to_plot = -1 # which cluster_num to plot?
+
+for (basename, taste), taste_group in grouped:
+    #if basename == 'nb32_test2_4tastes_240203_121309' and taste == 1:
+    if basename == 'nm43_500ms_160514_111131':
+
+
+        transition_time_point = fixed_transition_time
+        behaviors_to_plot_this_round = taste_group[taste_group['cluster_num'] == desired_clust_to_plot]
+        behaviors_to_plot_this_round = behaviors_to_plot_this_round[behaviors_to_plot_this_round['taste_num'] == taste]
+        behaviors_to_plot_this_round = behaviors_to_plot_this_round.drop_duplicates(subset=['segment_bounds'])
+        
+        
+        fig = plt.figure(figsize=(10, 10))
+        gs = gridspec.GridSpec(2, 1, height_ratios=[1, 3], hspace=0.05)
+
+        # =========================
+        # Top panel: raw count frequency
+        # =========================
+        ax_freq = fig.add_subplot(gs[0])
+        time_bins = np.linspace(-window_len, window_len, 1000)
+        freq_trace = np.zeros_like(time_bins, dtype=float)
+        
+        for _, row in behaviors_to_plot_this_round.iterrows():
+            segment_bounds = row['segment_bounds']
+            start = segment_bounds[0] - transition_time_point
+            end = segment_bounds[1] - transition_time_point
+
+            # Add 1 to all bins where the behavior is active
+            freq_trace += ((time_bins >= start) & (time_bins <= end)).astype(float)
+        window_size = 20  # adjust for more/less smoothing
+        freq_trace_smoothed = np.convolve(freq_trace, np.ones(window_size)/window_size, mode='same')
+        ax_freq.step(time_bins, freq_trace_smoothed, color='black', linewidth=2, where='mid')
+        # Step plot for exact counts
+        #ax_freq.step(time_bins, freq_trace, color='black', linewidth=2, where='mid')
+        ax_freq.axvline(0, color='k', linestyle='--')
+        ax_freq.set_xlim([-window_len, window_len])
+        ax_freq.set_ylabel('Frequency')
+        ax_freq.set_xticklabels([])  # hide x-axis labels
+        ax_freq.set_title(f"Taste: {convert_taste_num_to_name(basename, taste, df)}")
+
+
+        # =========================
+        # Bottom panel: raster plot
+        # =========================
+        ax_raster = fig.add_subplot(gs[1])
+
+        for _, row in behaviors_to_plot_this_round.iterrows():
+            trial_num = row['trial_num']
+            segment_bounds = row['segment_bounds']
+            start = segment_bounds[0] - transition_time_point
+            end = segment_bounds[1] - transition_time_point
+            
+            ax_raster.hlines(y=trial_num, xmin=start, xmax=end,
+                             color=color_mapping.get(desired_clust_to_plot, 'black'), linewidth=8)
+        ax_raster.set_xlim([-window_len, window_len])
+        ax_raster.axvline(0, color='k', linestyle='--')
+        ax_raster.set_ylabel('Trial')
+        ax_raster.set_xlabel('Time (ms)')
+
+        plt.suptitle(f'{basename}')
+
+        #plt.savefig('/home/natasha/Desktop/final_figures/raster_plot.svg')
+        #plt.savefig('/home/natasha/Desktop/final_figures/raster_plot.png')
+        plt.show()
+
+
+# %% # BEFORE/AFTER TRANSITION COUNT WITH STATS TESTS - OBSOLETE
+
+# Convert the summary data to a DataFrame
+summary_df = pd.DataFrame(summary_data)
+summary_df = summary_df[summary_df['cluster_num'] != -2.0] # REMOVE NO MOVEMENT
+
+unique_combinations = summary_df[['cluster_num', 'taste_name']].drop_duplicates()
+
+# ==============================================================================
+# Plot and test where every data point is a trial
+# ==============================================================================
+
+count_df = summary_df.groupby(
+    ['basename', 'cluster_num', 'event_position', 'taste_name', 'trial']
+).size().reset_index(name='movement_count')
+# Make sure before values are ordered first, then after values. For plotting
+count_df['event_position'] = pd.Categorical(count_df['event_position'], categories=['before', 'after'], ordered=True)
+
+trial_results = []
+for _, row in unique_combinations.iterrows():
+    cluster = row['cluster_num']
+    taste = row['taste_name']
+
+    # Filter count_df for matching rows
+    matching_rows = count_df[
+        (count_df['cluster_num'] == cluster) &
+        (count_df['taste_name'] == taste)
+    ]
+    
+    num_of_rows = len(matching_rows['trial'].unique())
+    ttest_df = pd.DataFrame(0, index=range(num_of_rows), columns=['trial', 'before', 'after'])
+    ttest_df.trial = matching_rows['trial'].unique()
+    
+    
+    for _, row in matching_rows.iterrows():
+        trial = row['trial']
+        event_pos = row['event_position']
+        move_count = row['movement_count']
+        
+        ttest_df.loc[ttest_df['trial'] == trial, event_pos] = move_count
+        
+    before_counts = ttest_df['before'].tolist()
+    after_counts = ttest_df['after'].tolist()
+    stat, pval = ttest_rel(before_counts, after_counts)   
+    res = stats.poisson_means_test(sum(before_counts), len(before_counts), sum(after_counts), len(after_counts))
+  
+    trial_results.append({
+        'taste': taste,
+        'cluster_num': cluster,
+        'n_trials': len(ttest_df),
+        'ttest_pvalue': pval,
+        'poisson_pvalue': res.pvalue
+    })
+
+# Convert results to DataFrame
+trial_results_df = pd.DataFrame(trial_results)
+
+print("\nT-TEST: every data point is a trial")
+for _,row in trial_results_df.iterrows():
+    if row['ttest_pvalue'] < 0.05:
+        taste = row['taste']
+        cluster_num= row['cluster_num']
+        print(f'Significant: {taste} and cluster {cluster_num}')
+
+        
+print("\nPOISSON MEANS TEST: every data point is a trial")
+# Print any significant results
+for _,row in trial_results_df.iterrows():
+    if row['poisson_pvalue'] < 0.05:
+        taste = row['taste']
+        cluster_num= row['cluster_num']
+        print(f'Significant: taste {taste} and cluster {cluster_num}')
+
+# Plot grid of taste num by cluster num
+g = sns.FacetGrid(count_df, col='taste_name', row='cluster_num', margin_titles=True, sharey=False)
+g.map_dataframe(
+    sns.boxplot,
+    x='event_position',
+    y='movement_count',
+    hue='event_position',
+    palette='pastel',
+    legend=False
+)
+g.set_axis_labels("", "Movement Count")
+plt.tight_layout()
+g.fig.suptitle("By trial", y=1.02)  # y controls vertical position
+
+plt.show()
+count_df.to_pickle("/home/natasha/Desktop/clustering_data/trial_count.pkl")  
+trial_results_df.to_pickle("/home/natasha/Desktop/clustering_data/trial_results.pkl")  
+
+# ==============================================================================
+# Plot and test where every data point is a test session
+# ==============================================================================
+
+session_count_df = summary_df.groupby(
+    ['basename', 'cluster_num', 'event_position', 'taste_name']
+).size().reset_index(name='movement_count')
+session_count_df['event_position'] = pd.Categorical(session_count_df['event_position'], categories=['before', 'after'], ordered=True)
+session_count_df.to_pickle("/home/natasha/Desktop/clustering_data/session_counts.pkl") 
+session_results = []
+for _, row in unique_combinations.iterrows():
+    cluster = row['cluster_num']
+    taste = row['taste_name']
+
+    # Filter count_df for matching rows
+    matching_rows = session_count_df[
+        (session_count_df['cluster_num'] == cluster) &
+        (session_count_df['taste_name'] == taste)
+    ]
+    
+    num_of_rows = len(matching_rows['basename'].unique())
+    ttest_df = pd.DataFrame(0, index=range(num_of_rows), columns=['basename', 'before', 'after'])
+    ttest_df.basename = matching_rows['basename'].unique()
+    
+    
+    for _, row in matching_rows.iterrows():
+        basename = row['basename']
+        event_pos = row['event_position']
+        move_count = row['movement_count']
+        
+        ttest_df.loc[ttest_df['basename'] == basename, event_pos] = move_count
+        
+    before_counts = ttest_df['before'].tolist()
+    after_counts = ttest_df['after'].tolist()
+    stat, pval = ttest_rel(before_counts, after_counts)   
+    res = stats.poisson_means_test(sum(before_counts), len(before_counts), sum(after_counts), len(after_counts))
+
+    session_results.append({
+        'taste': taste,
+        'cluster_num': cluster,
+        'n_sessions': len(ttest_df),
+        'ttest_pvalue': pval,
+        'poisson_pvalue': res.pvalue
+    })
+
+# Convert results to DataFrame
+session_results_df = pd.DataFrame(session_results)
+
+print("\nT-TEST: every data point is a session")
+for _,row in session_results_df.iterrows():
+    if row['ttest_pvalue'] < 0.05:
+        taste = row['taste']
+        cluster_num= row['cluster_num']
+        print(f'Significant: {taste} and cluster {cluster_num}')
+
+        
+print("\nPOISSON MEANS TEST: every data point is a session")
+# Print any significant results
+for _,row in session_results_df.iterrows():
+    if row['poisson_pvalue'] < 0.05:
+        taste = row['taste']
+        cluster_num= row['cluster_num']
+        print(f'Significant: taste {taste} and cluster {cluster_num}')
+
+
+# Plot grid of taste num by cluster num
+g = sns.FacetGrid(session_count_df, col='taste_name', row='cluster_num', margin_titles=True, sharey=False)
+g.map_dataframe(
+    sns.stripplot,
+    x='event_position',
+    y='movement_count',
+    hue='event_position',
+    palette='pastel',
+    legend=False,
+    s=10
+)
+g.set_axis_labels("", "Movement Count")
+plt.tight_layout()
+g.fig.suptitle("By session", y=1.02)  # y controls vertical position
+
+plt.show()
+
+
+session_results_df.to_pickle("/home/natasha/Desktop/clustering_data/session_results.pkl")  
 
 
 
 
-# %% BEFORE/AFTER COUNTS ON A PER-SESSION BASIS
+
+# %% BEFORE/AFTER COUTNS BY TRIAL PER TEST SESSION - IN PROGRESS
+import os
+import pandas as pd
+import numpy as np
+from tqdm import tqdm
+from scipy.stats import ttest_rel
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 # -------------------------------
 # Load and prepare summary data
 # -------------------------------
@@ -432,7 +753,7 @@ for _, combo in unique_combinations.iterrows():
     before_counts = ttest_df['before'].tolist()
     after_counts = ttest_df['after'].tolist()
 
-   # t_stat, t_pval = ttest_rel(before_counts, after_counts)
+    t_stat, t_pval = ttest_rel(before_counts, after_counts)
     res = stats.poisson_means_test(sum(before_counts), len(before_counts),
                              sum(after_counts), len(after_counts))
 
@@ -443,7 +764,7 @@ for _, combo in unique_combinations.iterrows():
         'taste': taste,
         'cluster_num': cluster,
         'n_trials': num_trials,
-        'poisson_stat': res.statistic,
+        'ttest_pvalue': t_pval,
         'poisson_pvalue': res.pvalue,
         'sig_status': sig_status
     })
@@ -459,7 +780,7 @@ sig_results = session_trial_results_df[session_trial_results_df['poisson_pvalue'
 for _, row in sig_results.iterrows():
     print(f"{row['basename']}: {row['taste']} (cluster {row['cluster_num']})")
 
-
+# %%
 # -------------------------------
 # Plot: violin plots per session
 # -------------------------------
@@ -467,18 +788,15 @@ output_dir = os.path.join(dirname, 'session_analysis')
 os.makedirs(output_dir, exist_ok=True)
 
 unique_basenames = count_df['basename'].unique()
-#unique_basenames = 'nb34_test3_4tastes_240209_123329'
-# Define custom colors
 custom_palette = {
-    'before': '#a6cee3',  # 
-    'after': '#b2df84'    #
+    'before': '#0CBABA',  # darker green
+    'after': '#99979e'    # darker blue
 }
-
 
 for basename in tqdm(unique_basenames):
     subset = count_df[count_df['basename'] == basename]
 
-    g = sns.FacetGrid(subset, row='taste_name', col='cluster_num', margin_titles=True, sharey=False)
+    g = sns.FacetGrid(subset, row='taste_name', col='cluster_num', margin_titles=True, sharey=True)
     g.map_dataframe(
         sns.violinplot,
         x='event_position',
@@ -491,17 +809,17 @@ for basename in tqdm(unique_basenames):
     # Annotate p-values and trial counts
     for (row_val, col_val), ax in g.axes_dict.items():
         subsub = subset[
-            (subset['cluster_num'] == col_val) &
-            (subset['taste_name'] == row_val)
+            (subset['cluster_num'] == row_val) &
+            (subset['taste_name'] == col_val)
         ]
         basename_val = subset['basename'].iloc[0]
 
         res_row = session_trial_results_df[
-            (session_trial_results_df['cluster_num'] == col_val) &
-            (session_trial_results_df['taste'] == row_val) &
+            (session_trial_results_df['cluster_num'] == row_val) &
+            (session_trial_results_df['taste'] == col_val) &
             (session_trial_results_df['basename'] == basename_val)
         ]
-
+        '''
         if len(res_row) == 0:
             label = "No data"
         else:
@@ -512,116 +830,47 @@ for basename in tqdm(unique_basenames):
         ax.text(0.05, 0.95, label, transform=ax.transAxes,
                 ha='left', va='top', fontsize=8,
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='gray', alpha=0.7))
-
+        '''
     g.fig.suptitle(f'Basename: {basename}', y=1.02)
     safe_basename = basename.replace('/', '_')
     filepath = os.path.join(output_dir, f"{safe_basename}_violin.png")
     g.savefig(filepath)
+    if basename == 'nb34_test3_4tastes_240209_123329':
+        g.savefig(f"/home/natasha/Desktop/final_figures/{safe_basename}_violinplot.svg", format="svg")
+        g.savefig(f"/home/natasha/Desktop/final_figures/{safe_basename}_violinplot.png", format="png")
+    
     plt.close(g.fig)
-    #plt.show()
 
-# %% SAME PLOTTING AS ABOVE, BUT FOR ONE EXAMPLE ONLY - GOOD FOR PUBLICATION
+# %%
 
-subset_filtered = count_df[(count_df['basename'] == 'km50_5tastes_emg_210911_104510_copy') &
-                           (count_df['taste_name'].isin(['qhcl', 'suc']))]
-
-g = sns.FacetGrid(subset_filtered, row='taste_name', col='cluster_num', margin_titles=True, sharey=True)
-g.map_dataframe(
-    sns.violinplot,
-    x='event_position',
-    y='movement_count',
-    hue='event_position',
-    palette=custom_palette,
-    legend=False
-)
-
-for (row_val, col_val), ax in g.axes_dict.items():
-    subsub = subset_filtered[
-        (subset_filtered['cluster_num'] == col_val) &
-        (subset_filtered['taste_name'] == row_val)
-    ]
-    basename_val = subset_filtered['basename'].iloc[0]
-
-    res_row = session_trial_results_df[
-        (session_trial_results_df['cluster_num'] == col_val) &
-        (session_trial_results_df['taste'].isin(['qhcl', 'suc'])) &
-        (session_trial_results_df['basename'] == basename_val) &
-        (session_trial_results_df['taste'] == row_val)
-    ]
-    pvalue_for_now = res_row['poisson_pvalue']
-    stat_for_now = res_row['poisson_stat']
-    print(f'{row_val} {col_val}: {pvalue_for_now} and {stat_for_now}')
-    print('/n')
-    if len(res_row) == 0:
-        label = "No data"
-        ax.text(0.05, 0.95, label, transform=ax.transAxes,
-                ha='left', va='top', fontsize=8,
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='gray', alpha=0.7))
-    else:
-        pval = res_row['poisson_pvalue'].iloc[0]
-       
-        if pval < 0.001:
-            sig_label = '***'
-        elif pval < 0.01:
-            sig_label = '**'
-        elif pval < 0.05:
-            sig_label = '*'
-        else:
-            sig_label = 'ns'
-
-        if pval < 0.05:
-            y_bar = 6      # fixed bar height
-            y_text = 6.2   # text slightly above the bar
-        
-            ax.plot([0, 0, 1, 1], [y_bar, y_bar, y_bar, y_bar],
-                    lw=1.2, c='black')
-            ax.text(0.5, y_text, sig_label, ha='center', va='bottom', fontsize=10)
-
-            
-# Remove x-axis tick labels for all subplots
-for ax in g.axes.flat:
-    ax.set_xticklabels(['Before', "After"])  # remove tick labels
-    ax.set_xlabel('')       # remove per-axis label
-    #ax.set_title(['Gapes', "Subtype #1", "Subtype #2", "Subtype #3"])
-
-custom_titles = ['', "MTM #1", "MTM #2", "MTM #3"]
-for ax, title in zip(g.axes[0], custom_titles):
-    ax.set_title(title)
-    
-# Add one shared x-axis label at the bottom
-g.fig.text(0.625, 1.02, "Mouth or Tongue Movements (MTMs)", ha='center', fontsize=12)
-g.fig.text(0.15, 1.02, "Gapes", ha='center', fontsize=12)
-
-#g.fig.suptitle(f'Basename: {basename}', y=1.02)
-
-safe_basename = basename.replace('/', '_')
-plt.savefig(f"/home/natasha/Desktop/final_figures/violinplot.svg", format="svg", bbox_inches="tight", dpi=300)
-plt.savefig(f"/home/natasha/Desktop/final_figures/violinplot.png", format="png", bbox_inches="tight", dpi=300)
-
+'''
+# PLOT: KDE plot - overall
+kde_overall = sns.displot(data=session_trial_results_df, x="poisson_pvalue")
+kde_overall.fig.suptitle("Distribution of All T-test P-values", y=0.98)
+kde_overall.fig.tight_layout()
+kde_overall.fig.savefig(os.path.join(output_dir, "ttest_kde_overall.png"))
 plt.show()
+'''
 
-    
-# %% PLOT: REAL P-VALUE DISTRIBUTION AGAINST RANDOMIZED DATA
 
-# -------------------------------
-# Generate uniform distribution with randomized data
-# -------------------------------
+## PLOT: P-VALUE DISTRIBUTION WITH RANDOMIZED DATA
 # Parameters
-n_values = len(session_trial_results_df)
+n_values = len(session_trial_results_df) 
 n_reps = 50
 binwidth = 0.05
 bins = np.arange(0, 1 + binwidth, binwidth)
 bin_centers = bins[:-1] + binwidth / 2
 
+# Generate random uniform(0,1) data
+random_data = np.random.uniform(0, 1, size=(n_reps, n_values))
 
-random_data = np.random.uniform(0, 1, size=(n_reps, n_values)) # Generate random uniform(0,1) data
-counts_per_rep = np.array([np.histogram(rep, bins=bins)[0] for rep in random_data]) # Histogram counts for each repetition
-mean_counts = counts_per_rep.mean(axis=0) # Mean across reps
-se_counts = counts_per_rep.std(axis=0, ddof=1) / np.sqrt(n_reps)# SE across reps
+# Histogram counts for each repetition
+counts_per_rep = np.array([np.histogram(rep, bins=bins)[0] for rep in random_data])
 
-# -------------------------------
-# Plot!
-# -------------------------------
+# Mean and SE across reps
+mean_counts = counts_per_rep.mean(axis=0)
+se_counts = counts_per_rep.std(axis=0, ddof=1) / np.sqrt(n_reps)
+
 # Plot real data histogram
 plt.figure(figsize=(10, 8))
 sns.histplot(
@@ -629,7 +878,7 @@ sns.histplot(
     x="poisson_pvalue",
     binwidth=binwidth,
     color="dimgray",
-    alpha=1,
+    alpha=0.7,
     label="Real Data"
 )
 
@@ -638,8 +887,8 @@ plt.bar(
     bin_centers,
     mean_counts,
     width=binwidth * 0.9,
-    color="moccasin",
-    alpha=0.7,
+    color="pink",
+    alpha=0.5,
     label="Random Mean (±SE)"
 )
 # Add error bars for SE
@@ -664,110 +913,93 @@ plt.savefig("/home/natasha/Desktop/final_figures/poisson_pval_dist.svg", format=
 plt.savefig("/home/natasha/Desktop/final_figures/poisson_pval_dist.png", format="png")
 plt.show()
 
+
+
+
 # -------------------------------
-# Statistics
+# Chi Squared Test  - poisson p-values deviate from random
 # -------------------------------
+bins = np.arange(0, 1.05, 0.05)  # from 0 to 1, in 0.05 steps
+#bins = np.logspace(-1.5, 0, num= 10)
 
+observed_counts, _ = np.histogram(session_trial_results_df["poisson_pvalue"], bins=bins)
+expected_counts, _ = np.histogram(random_data, bins=bins)
 
-counts, bin_edges = np.histogram(
-    session_trial_results_df["poisson_pvalue"], 
-    bins=np.arange(0, 1+binwidth, binwidth)  # same bins as the plot
-)
+chi2_stat, p_val = chisquare(f_obs=observed_counts, f_exp=expected_counts)
 
-first_bin_count = counts[0] # real count of how many significant test there are
+print(f"Chi-squared statistic: {chi2_stat:.2f}")
+print(f"P-value: {p_val:.4f}")
 
-p_right = norm.sf(first_bin_count, loc=mean_counts[0], scale=se_counts[0])
-print(f'p-value that there is a greater number of significant session that by chance {p_right}')
-
-
-## TODO: CHANGE ABOVE TO BINOMIAL TEST
-
-ks_stats = stats.kstest(counts, mean_counts)
-
-if ks_stats.pvalue < 0.05:
-    print("Diagonal distances statistically different from non-diagonal")
-    print(f"pvalue: {ks_stats.pvalue}, KS Statistic (D): {ks_stats.statistic}")
+if p_val < 0.05:
+    print("The p-value distribution significantly deviates from uniformity.")
 else:
-    print("Warning: diagonal distances NOT statistically different from non-diagonal")
+    print("The p-value distribution does not significantly deviate from uniformity.")
+
+# actually plot
+kde_by_taste = sns.displot(
+    data=session_trial_results_df,
+    x="poisson_pvalue",
+    kind="kde",
+    row="taste",
+    fill=True,
+    height=3,
+    aspect=3
+)
+kde_by_taste.fig.savefig(os.path.join(output_dir, "ttest_kde_by_taste.png"))
+plt.show()
+plt.close(kde_by_taste.fig)
 
 
-# %% TASTANT x MOVEMENT MATRIX OF PROPORTION OF SIGNIFICANT P-VALUES
 
+## PLOT: P-VALUE DISTRIBUTION WITH RANDOMIZED DATA
 taste_order = ['qhcl', 'quind', 'ca', 'suc', 'nacl', 'water']  # change as needed
-
+# Step 1: compute both proportion of "yes" and total count
 grouped = (
     session_trial_results_df
     .groupby(['cluster_num', 'taste'])['sig_status']
 )
+
 summary_df = grouped.agg([
     ('num_sig', lambda x: (x == 'yes').sum()),
     ('total', 'count')
 ]).reset_index()
 
+# Compute proportion
 summary_df['proportion_sig'] = summary_df['num_sig'] / summary_df['total']
 
 # Step 2: pivot the proportion matrix (for coloring)
+#proportion_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='proportion_sig')
 proportion_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='proportion_sig')[taste_order]
 
 # Step 3: create annotations like "0.67 (3)"
 summary_df['annot'] = summary_df.apply(
     lambda row: f"{row['proportion_sig']:.2f}\n(N={int(row['total'])})", axis=1
 )
+#annot_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='annot')
 annot_matrix = summary_df.pivot(index='cluster_num', columns='taste', values='annot')[taste_order]
 
 
-
-norm = mpl.colors.Normalize(vmin=0, vmax=0.67)  # cap color scale
-
+# Step 4: plot the heatmap
 plt.figure(figsize=(10, 6))
-ax = sns.heatmap(
+sns.heatmap(
     proportion_matrix,
     annot=annot_matrix,
-    fmt='',
+    fmt='',  # Since annotations are strings
     cmap='viridis',
-    norm=norm,
+    vmin=0,
+    vmax=1,
     cbar_kws={'label': 'Proportion Significant'},
-    linewidths=1,
-    linecolor='white'
+    linewidths=1,       # Thickness of the lines
+    linecolor='white'   # Color of the lines
 )
-# Get axis limits
-xmin, xmax = ax.get_xlim()
-ymin, ymax = ax.get_ylim()
-
-# Which x positions to put long ticks (before QHCL=0, between CA/SUC=3, after WATER=7)
-special_positions = [0.01, 3, 5.99]
-
-for pos in special_positions:
-    ax.vlines(
-        x=pos, ymin=0, ymax=ymin+0.4,   # extend *below* the bottom
-        color='black', linewidth=1.2, clip_on=False
-    )
-# Add custom group labels under x-axis
-ax.text(1.5, ymin+0.3, "Aversive", ha='center', va='top',
-        fontsize=12, transform=ax.transData)
-ax.text(4.5, ymin+0.3, "Palatable", ha='center', va='top',
-        fontsize=12, transform=ax.transData)
-custom_xlabels = ["QHCl", "Dil-QHCl", "CA", "Sucrose", "NaCl", "Water"]
-ax.set_xticklabels(custom_xlabels, ha="center", fontsize=11)
-
-custom_ylabels = ["", "MTM #1", "MTM #2", "MTM #3"]
-ax.set_yticklabels(custom_ylabels, ha="center", fontsize=11)
-ax.text(-0.3, 0.5, "Gapes", va="center", ha="right", fontsize=12, rotation=90)
-ax.text(-0.3, 2.5, "Mouth or Tongue Movements (MTMs)", va="center", ha="right", fontsize=12, rotation=90)
-
-
-# Add a small gap line after row 0
-ymin, ymax = ax.get_ylim()
-gap_y = 1  # between row 0 and 1
-ax.hlines(gap_y, *ax.get_xlim(), color="white", linewidth=6)  # adjust linewidth
-
-#plt.title("Proportion of Significant Results (Poisson)")
-plt.xlabel("")
-plt.ylabel("")
+plt.title("Proportion of Significant Results (Poisson)")
+plt.xlabel("Taste")
+plt.ylabel("Cluster Number")
 plt.tight_layout()
-plt.savefig("/home/natasha/Desktop/final_figures/pval_cluster_taste_matrix_withgap.svg", format="svg")
-plt.savefig("/home/natasha/Desktop/final_figures/pval_cluster_taste_matrix_withgap.png", format="png")
+plt.savefig("/home/natasha/Desktop/final_figures/pval_cluster_taste_matrix.svg", format="svg")
+plt.savefig("/home/natasha/Desktop/final_figures/pval_cluster_taste_matrix.png", format="png")
 plt.show()
+
 
 
 # %%
@@ -918,7 +1150,7 @@ summary_pivot.drop(columns=['taste'], inplace=True)
 
 collapsed_summary = summary_pivot.groupby(['cluster_num', 'taste_name'], as_index=False).sum()
 
-
+# TODO: REMOVE NO MOVEMENT
 collapsed_summary = collapsed_summary[collapsed_summary['cluster_num'] != -2.0]
 
 
@@ -1540,183 +1772,4 @@ for basename, taste_group in grouped:
     plt.suptitle(f'{basename}')
     plt.tight_layout()
     plt.show()
-'''
-'''
-# %% # BEFORE/AFTER TRANSITION COUNTS WITH STATS TESTS - EVERY DATA POINT IS A SESSION - ARCHIVE
-
-# Convert the summary data to a DataFrame
-summary_df = pd.DataFrame(summary_data)
-summary_df = summary_df[summary_df['cluster_num'] != -2.0] # REMOVE NO MOVEMENT
-
-unique_combinations = summary_df[['cluster_num', 'taste_name']].drop_duplicates()
-
-# ==============================================================================
-# Plot and test where every data point is a trial
-# ==============================================================================
-
-count_df = summary_df.groupby(
-    ['basename', 'cluster_num', 'event_position', 'taste_name', 'trial']
-).size().reset_index(name='movement_count')
-# Make sure before values are ordered first, then after values. For plotting
-count_df['event_position'] = pd.Categorical(count_df['event_position'], categories=['before', 'after'], ordered=True)
-
-trial_results = []
-for _, row in unique_combinations.iterrows():
-    cluster = row['cluster_num']
-    taste = row['taste_name']
-
-    # Filter count_df for matching rows
-    matching_rows = count_df[
-        (count_df['cluster_num'] == cluster) &
-        (count_df['taste_name'] == taste)
-    ]
-    
-    num_of_rows = len(matching_rows['trial'].unique())
-    ttest_df = pd.DataFrame(0, index=range(num_of_rows), columns=['trial', 'before', 'after'])
-    ttest_df.trial = matching_rows['trial'].unique()
-    
-    
-    for _, row in matching_rows.iterrows():
-        trial = row['trial']
-        event_pos = row['event_position']
-        move_count = row['movement_count']
-        
-        ttest_df.loc[ttest_df['trial'] == trial, event_pos] = move_count
-        
-    before_counts = ttest_df['before'].tolist()
-    after_counts = ttest_df['after'].tolist()
-    stat, pval = ttest_rel(before_counts, after_counts)   
-    res = stats.poisson_means_test(sum(before_counts), len(before_counts), sum(after_counts), len(after_counts))
-  
-    trial_results.append({
-        'taste': taste,
-        'cluster_num': cluster,
-        'n_trials': len(ttest_df),
-        'ttest_pvalue': pval,
-        'poisson_pvalue': res.pvalue
-    })
-
-# Convert results to DataFrame
-trial_results_df = pd.DataFrame(trial_results)
-
-print("\nT-TEST: every data point is a trial")
-for _,row in trial_results_df.iterrows():
-    if row['ttest_pvalue'] < 0.05:
-        taste = row['taste']
-        cluster_num= row['cluster_num']
-        print(f'Significant: {taste} and cluster {cluster_num}')
-
-        
-print("\nPOISSON MEANS TEST: every data point is a trial")
-# Print any significant results
-for _,row in trial_results_df.iterrows():
-    if row['poisson_pvalue'] < 0.05:
-        taste = row['taste']
-        cluster_num= row['cluster_num']
-        print(f'Significant: taste {taste} and cluster {cluster_num}')
-
-# Plot grid of taste num by cluster num
-g = sns.FacetGrid(count_df, col='taste_name', row='cluster_num', margin_titles=True, sharey=False)
-g.map_dataframe(
-    sns.boxplot,
-    x='event_position',
-    y='movement_count',
-    hue='event_position',
-    palette='pastel',
-    legend=False
-)
-g.set_axis_labels("", "Movement Count")
-plt.tight_layout()
-g.fig.suptitle("By trial", y=1.02)  # y controls vertical position
-
-plt.show()
-count_df.to_pickle("/home/natasha/Desktop/clustering_data/trial_count.pkl")  
-trial_results_df.to_pickle("/home/natasha/Desktop/clustering_data/trial_results.pkl")  
-
-# ==============================================================================
-# Plot and test where every data point is a test session
-# ==============================================================================
-
-session_count_df = summary_df.groupby(
-    ['basename', 'cluster_num', 'event_position', 'taste_name']
-).size().reset_index(name='movement_count')
-session_count_df['event_position'] = pd.Categorical(session_count_df['event_position'], categories=['before', 'after'], ordered=True)
-session_count_df.to_pickle("/home/natasha/Desktop/clustering_data/session_counts.pkl") 
-session_results = []
-for _, row in unique_combinations.iterrows():
-    cluster = row['cluster_num']
-    taste = row['taste_name']
-
-    # Filter count_df for matching rows
-    matching_rows = session_count_df[
-        (session_count_df['cluster_num'] == cluster) &
-        (session_count_df['taste_name'] == taste)
-    ]
-    
-    num_of_rows = len(matching_rows['basename'].unique())
-    ttest_df = pd.DataFrame(0, index=range(num_of_rows), columns=['basename', 'before', 'after'])
-    ttest_df.basename = matching_rows['basename'].unique()
-    
-    
-    for _, row in matching_rows.iterrows():
-        basename = row['basename']
-        event_pos = row['event_position']
-        move_count = row['movement_count']
-        
-        ttest_df.loc[ttest_df['basename'] == basename, event_pos] = move_count
-        
-    before_counts = ttest_df['before'].tolist()
-    after_counts = ttest_df['after'].tolist()
-    stat, pval = ttest_rel(before_counts, after_counts)   
-    res = stats.poisson_means_test(sum(before_counts), len(before_counts), sum(after_counts), len(after_counts))
-
-    session_results.append({
-        'taste': taste,
-        'cluster_num': cluster,
-        'n_sessions': len(ttest_df),
-        'ttest_pvalue': pval,
-        'poisson_pvalue': res.pvalue
-    })
-
-# Convert results to DataFrame
-session_results_df = pd.DataFrame(session_results)
-
-print("\nT-TEST: every data point is a session")
-for _,row in session_results_df.iterrows():
-    if row['ttest_pvalue'] < 0.05:
-        taste = row['taste']
-        cluster_num= row['cluster_num']
-        print(f'Significant: {taste} and cluster {cluster_num}')
-
-        
-print("\nPOISSON MEANS TEST: every data point is a session")
-# Print any significant results
-for _,row in session_results_df.iterrows():
-    if row['poisson_pvalue'] < 0.05:
-        taste = row['taste']
-        cluster_num= row['cluster_num']
-        print(f'Significant: taste {taste} and cluster {cluster_num}')
-
-
-# Plot grid of taste num by cluster num
-g = sns.FacetGrid(session_count_df, col='taste_name', row='cluster_num', margin_titles=True, sharey=False)
-g.map_dataframe(
-    sns.stripplot,
-    x='event_position',
-    y='movement_count',
-    hue='event_position',
-    palette='pastel',
-    legend=False,
-    s=10
-)
-g.set_axis_labels("", "Movement Count")
-plt.tight_layout()
-g.fig.suptitle("By session", y=1.02)  # y controls vertical position
-
-plt.show()
-
-
-session_results_df.to_pickle("/home/natasha/Desktop/clustering_data/session_results.pkl")  
-
-
 '''

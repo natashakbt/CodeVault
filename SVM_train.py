@@ -59,7 +59,7 @@ features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
 
 session_ind = features_expanded['session_ind'].unique()
 
-sample_frac = 0.3  # 30% of the training data
+sample_frac = 1  # 30% of the training data
 accuracy_scores = []
 confusion_matrices = []
 # Train the classifier 10x
@@ -109,7 +109,7 @@ plt.imshow(average_matrix, cmap='Greys_r')
 # Set tick labels
 plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
 plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
-
+   
 # Axis labels
 plt.xlabel("Predicted Cluster Labels")
 plt.ylabel("True Cluster Labels")

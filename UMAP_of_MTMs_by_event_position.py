@@ -201,7 +201,220 @@ for idx, row in transition_events_df.iterrows():
     event_position = "before" if segment_bounds[1] < 2800 else "after"
     transition_events_df.at[idx, 'event_position'] = event_position
 
-     
+# %% TRYING PCA 
+
+fig_dir = os.path.join(dirname, 'UMAP/UMAP_of_MTMs_by_event_position')
+os.makedirs(fig_dir, exist_ok=True)
+
+files = glob.glob(os.path.join(fig_dir, '*'))
+for file in files:
+    os.remove(file)  # Remove each file
+
+p_val_dict = {}
+n_iterations = 1 # Suggest using 10 iterations
+
+from sklearn.decomposition import PCA
+
+unique_sessions = transition_events_df['basename'].unique()
+for n in tqdm(range(n_iterations)):
+    for basename in unique_sessions:
+        session_df = transition_events_df[transition_events_df['basename'] == basename]
+        mtm_df = session_df[session_df['event_type'] == 'MTMs']
+        mtm_features = np.stack(mtm_df.raw_features.values)
+        
+        # PCA dimmentionality reduction and feature scaling
+        
+        scaler = StandardScaler()
+        scaled_mtm_features = scaler.fit_transform(mtm_features)
+        
+        # Fit PCA keeping 90% variance
+        pca = PCA(n_components=0.9)
+        embedding = pca.fit_transform(scaled_mtm_features)
+                
+        # Plot the UMAP projections
+        mtm_df = mtm_df.reset_index(drop=True)
+        embedding_df = pd.DataFrame({
+            'x': embedding[:, 0],
+            'y': embedding[:, 1],
+            'event_position': mtm_df['event_position'].values
+        })
+        '''
+        if n == 0:
+            plt.clf()
+            g = sns.displot(
+                data=embedding_df,
+                x='x',
+                y='y',
+                hue='event_position',
+                kind='kde',
+                height=6,
+                aspect=1,
+                palette={'before': '#16547e', 'after': '#33a02c'}
+            )
+ 
+
+            # Access the underlying axes
+            ax = g.ax  # only works if it's a single plot
+            g.set_axis_labels("", "")
+            # Get axis limits
+            xmin, xmax = ax.get_xlim()
+            ymin, ymax = ax.get_ylim()
+            
+            # Remove all axes
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_frame_on(False)
+            
+            # Add two small reference lines in bottom-left corner
+            offset_x = (xmax - xmin) * 0.04
+            offset_y = (ymax - ymin) * 0.05
+            corner_x, corner_y = xmin + offset_x, ymin + offset_y
+            
+            line_length_x = (xmax - xmin) * 0.10
+            line_length_y = (ymax - ymin) * 0.10
+            
+            ax.plot([corner_x, corner_x + line_length_x], [corner_y, corner_y], color='k', lw=2)  # x-axis
+            ax.plot([corner_x, corner_x], [corner_y, corner_y + line_length_y], color='k', lw=2)  # y-axis
+            
+            # Add labels
+            ax.text(corner_x - (xmax - xmin)*0.04, corner_y + line_length_y / 2, 
+                    'UMAP 2', fontsize=16, ha='right', va='center', rotation='vertical')
+
+            ax.text(corner_x + line_length_x / 2, corner_y - (ymax - ymin)*0.03, 
+                    'UMAP 1', fontsize=16, ha='center', va='top')
+
+            # Replace legend labels and remove title
+            new_labels = ['Before', 'After']
+            for t, l in zip(g._legend.texts, new_labels):
+                t.set_text(l)
+            g._legend.set_title('')  # remove legend title
+            
+            g.fig.suptitle(f'{basename}')
+            
+            fig_path = os.path.join(fig_dir, f'{basename}_countour_plot.png')
+            plt.savefig(fig_path)
+            fig_path_svg = os.path.join(fig_dir, f'{basename}_countour_plot.svg')
+            plt.savefig(fig_path_svg)
+            '''
+        before_values = embedding_df[embedding_df['event_position'] == 'before']
+        after_values = embedding_df[embedding_df['event_position'] == 'after']
+        
+        bin_num = 10
+        hb = plt.hist2d(before_values['x'], 
+            before_values['y'], 
+            bins = bin_num, 
+            density=True
+            )
+        ha = plt.hist2d(after_values['x'], 
+            after_values['y'], 
+            bins = bin_num, 
+            density = True
+            )
+        
+        h_result = hb[0] - ha[0]
+        h_mask = (ha[0] >0 *1) + (hb[0]>0 * 1)
+        # plt.imshow(h_mask*1)
+        
+        hresult_flat = h_result[h_mask].flatten()
+        actual_stat = np.abs(hresult_flat).sum()
+        
+        '''
+        if n == 0:
+            # Extra plots to show the 'before' vs 'after' distributions subtractions
+            plt.clf()
+            plt.contourf(ha[1][:-1], ha[2][:-1], h_result); plt.colorbar() 
+            plt.show()
+ 
+            # Plot h_result as a matrix
+            plt.clf()
+            plt.imshow(h_result, cmap = 'RdBu')
+            plt.colorbar(label='Before - After Values')
+            plt.title(f'{basename} \nbins={bin_num}')
+            plt.show()
+            
+            # Plot h_result, but smoothed
+            h_result_smooth = gaussian_filter(h_result, sigma=1.0)
+            
+            plt.clf()
+            plt.contourf(
+                ha[1][:-1], ha[2][:-1], h_result_smooth,
+                levels=100,
+                cmap='RdBu_r',
+                norm=TwoSlopeNorm(vcenter=0) # Make sure white is 0
+            )
+            plt.colorbar(label='Smoothed Before - After Density\ncentered on 0')
+            plt.title(f'{basename}\nSmoothed Histogram Difference')
+            fig_path = os.path.join(fig_dir, f'{basename}_smooth_difference.png')
+            plt.savefig(fig_path)
+        '''
+
+        n_boot = 1000
+        sh_stat = []
+        merged_df = pd.concat([before_values, after_values], axis = 0)
+        for i_shuff in range(n_boot):
+            before_sh = merged_df.sample(n=len(before_values))
+            after_sh = merged_df.sample(n=len(after_values))
+            
+            hb_sh = plt.hist2d(before_sh['x'], 
+                before_sh['y'], 
+                bins = bin_num, 
+                density=True
+            )
+            ha_sh = plt.hist2d(after_sh['x'], 
+                after_sh['y'], 
+                bins = bin_num, 
+                density = True
+            )
+            
+            h_result_sh = hb_sh[0] - ha_sh[0]
+            h_mask_sh = (ha_sh[0] >0 *1) + (hb_sh[0]>0 * 1)
+
+            hresult_flat_sh = h_result_sh[h_mask_sh].flatten()
+            sh_stat.append(np.abs(hresult_flat_sh).sum())
+            
+        divergence_p = 1 - (percentileofscore(sh_stat, actual_stat)/100)
+            
+        plt.hist(sh_stat);plt.axvline(actual_stat, c = 'red', linestyle = '--')
+        # print(divergence_p)
+        if basename not in p_val_dict:
+            p_val_dict[basename] = []
+        p_val_dict[basename].append(divergence_p)
+    
+        plt.clf()
+        
+
+# Convert the dictionary into a tidy DataFrame
+plot_df = pd.DataFrame([
+    {'basename': key, 'divergence_p': val}
+    for key, vals in p_val_dict.items()
+    for val in vals
+])
+plot_df['session'] = pd.factorize(plot_df['basename'])[0]
+
+
+
+plot_df['rat'] = plot_df['basename'].str.split('_').str[0]
+
+basename_to_session = {}
+prefix_counts = {}
+
+for basename in plot_df['basename'].unique():
+    prefix = basename.split('_')[0]
+    count = prefix_counts.get(prefix, 1)
+
+    session_name = f"{prefix}_{count}"
+    basename_to_session[basename] = session_name
+    prefix_counts[prefix] = count + 1
+    
+plot_df['session'] = plot_df['basename'].map(basename_to_session)
+
+# Sort so sessions stay in order within each rat
+plot_df = plot_df.sort_values(['rat', 'basename']).reset_index(drop=True)
+
+
+# Assign a unique numeric ID to each session
+session_map = {s: i for i, s in enumerate(plot_df['session'].unique(), start=1)}
+plot_df['session_id'] = plot_df['session'].map(session_map)
 
 # ==============================================================================
 # %% UMAP of MTM features by test session
