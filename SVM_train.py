@@ -145,3 +145,57 @@ if p_value < 0.05:
 else:
     print('The mean accuracy is not significantly different from chance!')
 
+# %%
+
+
+
+# Convert list of confusion matrices to array
+matrices_as_array = np.array(confusion_matrices)  # shape: (n_matrices, n_classes, n_classes)
+
+# Extract diagonal values (accuracy per class) from each matrix
+# This will give a shape (n_matrices, n_classes)
+diagonal_accuracies = np.array([np.diag(cm) for cm in matrices_as_array])
+
+# Create a boxplot
+plt.figure(figsize=(8, 12))
+plt.boxplot([diagonal_accuracies[:, i] for i in range(diagonal_accuracies.shape[1])],
+            labels=[1, 2, 3],
+            boxprops=dict(linewidth=2.5),
+            whiskerprops=dict(linewidth=2.5),
+            capprops=dict(linewidth=2.5),
+            medianprops=dict(linewidth=2.5, color='blue'))
+
+
+plt.xlabel("Cluster Label")
+plt.axhline(y=0.3, color='red', linestyle='--', linewidth=3)
+
+# Remove top and right spines
+ax = plt.gca()  # get current axes
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
+plt.ylim(0, 1)  # since accuracies are proportions
+
+# Make axes (spines) thicker
+for spine in ax.spines.values():
+    spine.set_linewidth(2)  # increase number for thicker lines
+
+# Make tick labels bigger and bolder
+ax.tick_params(axis='both', which='major', labelsize=32, width=2)  # labelsize = font size, width = tick line thickness
+plt.xlabel("Cluster label", fontsize=37, labelpad=10)
+plt.ylabel("SVM accuracy", fontsize=37, labelpad=10)
+plt.tight_layout()
+plt.show()
+
+
+
+# diagonal_accuracies: shape (n_matrices, n_classes)
+n_classes = diagonal_accuracies.shape[1]
+
+for i in range(n_classes):
+    t_stat, p_value = stats.ttest_1samp(diagonal_accuracies[:, i], 0.3)
+    mean_val = np.mean(diagonal_accuracies[:, i])
+    if p_value < 0.05:
+        print(f"Class {i+1}: mean={mean_val:.3f} is significantly above 0.3 (p={p_value:.4f})")
+    else:
+        print(f"Class {i+1}: mean={mean_val:.3f} is NOT significantly above 0.3 (p={p_value:.4f})")

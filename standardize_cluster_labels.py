@@ -659,17 +659,168 @@ ax.set_xticklabels([])
 ax.set_yticklabels([])
 ax.set_zticklabels([])
 
+
+def nonlinear_alpha_cmap(hex_color, n_levels=256, gamma=3.0):
+    """
+    Create a colormap that fades from fully transparent to solid cluster color
+    with a nonlinear alpha curve (gamma > 1 = slower fade-in).
+    """
+    rgb = mcolors.to_rgb(hex_color)
+    colors = []
+
+    for i in range(n_levels):
+        frac = i / (n_levels - 1)
+        alpha = frac ** gamma  # nonlinear: fades in slowly
+        colors.append((*rgb, alpha))
+    
+    return mcolors.ListedColormap(colors)
+
+
+
+# Set up the plot
+#plt.figure(figsize=(12, 10))
+ax = plt.figure(figsize=(12, 10)).add_subplot(projection='3d')
+# Reset index to align with embedding
+reset_filtered_df = filtered_df.reset_index(drop=True)
+cluster_cycle = [0, 1, 2]
+center_points = []
+
+# KDE grid resolution
+grid_j = 80
+'''
+for cluster_num in cluster_cycle:
+    cluster_df = reset_filtered_df[reset_filtered_df['cluster_num'] == cluster_num]
+    cluster_indices = cluster_df.index
+    embedding_cluster = embedding[cluster_indices]
+
+    # Get x and y
+    x = embedding_cluster[:, 0]
+    y = embedding_cluster[:, 1]
+    color = color_mapping[cluster_num]
+
+    # Plot the scatter points
+    plt.scatter(x, y, c=color, s=12, edgecolor=color, alpha=0.1, label=f'Cluster {cluster_num}')
+'''
+for cluster_num in cluster_cycle:
+    cluster_df = reset_filtered_df[reset_filtered_df['cluster_num'] == cluster_num]
+    cluster_indices = cluster_df.index
+    embedding_cluster = embedding[cluster_indices]
+
+    # Get x and y
+    x = embedding_cluster[:, 0]
+    y = embedding_cluster[:, 1]
+    color = color_mapping[cluster_num]
+    # KDE
+    kde = gaussian_kde(np.vstack([x, y]))
+
+    xmin, xmax = x.min(), x.max()
+    ymin, ymax = y.min(), y.max()
+
+    xx, yy = np.mgrid[xmin:xmax:grid_j*1j, ymin:ymax:grid_j*1j]
+    positions = np.vstack([xx.ravel(), yy.ravel()])
+    density = kde(positions).reshape(xx.shape)
+
+    cmap = nonlinear_alpha_cmap(color_mapping[cluster_num], gamma=3)  # Try gamma = 3 to 5
+    ax.plot_surface(xx, yy, density, cmap=cmap)
+    
+    ## Density peak dots
+    # Find center
+    max_idx = np.unravel_index(np.argmax(density), density.shape)
+    x_center = xx[max_idx]
+    y_center = yy[max_idx]
+    center_points.append([x_center, y_center])
+    # Plot red center dot
+    plt.plot(x_center, y_center, density[max_idx], 'ro', markersize=25, markeredgecolor='k')
+    
+    
+
+# Create circle marker legend handles with solid color
+legend_handles = []
+for cluster_num in cluster_cycle:
+    color = color_mapping[cluster_num]
+    handle = mlines.Line2D([], [], color=color, marker='o', linestyle='None',
+                           markersize=10, label=f'Cluster {cluster_num+1}')
+    legend_handles.append(handle)
+
+# Optional: Add red circle for density peak
+peak_handle = mlines.Line2D([], [], color='red', marker='o', linestyle='None',
+                            markersize=10, label='Density Peaks')
+legend_handles.append(peak_handle)
+
+#plt.legend(handles=legend_handles)
+
+# Remove all grid lines
+ax.grid(False)
+
+# Make only the floor (xy plane at z=0) visible
+ax.xaxis.pane.fill = False
+ax.yaxis.pane.fill = False
+
+# Set floor color (z plane)
+ax.zaxis.pane.set_facecolor((0.97, 0.97, 0.97))  # RGB
+
+
+ax.set_xticks([])
+ax.set_yticks([])
+ax.set_zticks([])
+
+ax.set_xticklabels([])
+ax.set_yticklabels([])
+ax.set_zticklabels([])
+
+
+# Make axis lines thicker
+ax.xaxis.line.set_linewidth(2.5)
+ax.yaxis.line.set_linewidth(2.5)
+ax.zaxis.line.set_linewidth(2.5)
+
+# Increase tick label font sizes
+ax.tick_params(axis='x', labelsize=14, width=2)
+ax.tick_params(axis='y', labelsize=14, width=2)
+ax.tick_params(axis='z', labelsize=14, width=2)
+
+# Increase axis label font size
+ax.set_xlabel('UMAP 1', fontsize=18, labelpad=12)
+ax.set_ylabel('UMAP 2', fontsize=18, labelpad=12)
+ax.set_zlabel('Density', fontsize=18, labelpad=12)
+
+
+
 # Final touches
-plt.title('UMAP with KDE Density and Cluster Centers')
+plt.title('')
 plt.xlabel('UMAP 1')
 plt.ylabel('UMAP 2')
 ax.set_zlabel('Density')
 #plt.legend()
 plt.tight_layout()
 ax.view_init(elev=15, azim=-110)  # adjust numbers to taste
-plt.savefig("/home/natasha/Desktop/final_figures/3d_umap_kde_clusters.svg", format="svg")  # Save before show
-plt.savefig("/home/natasha/Desktop/final_figures/3d_umap_kde_clusters.png", format="png")  # Save before show
+#plt.savefig("/home/natasha/Desktop/final_figures/3d_umap_kde_clusters.svg", format="svg")  # Save before show
+#plt.savefig("/home/natasha/Desktop/final_figures/3d_umap_kde_clusters.png", format="png")  # Save before show
 #plt.show()
+
+from matplotlib import animation
+
+# Function to update view angle
+def rotate(angle):
+    ax.view_init(elev=15, azim=angle)
+
+# Make animation
+rot_animation = animation.FuncAnimation(
+    plt.gcf(), rotate, frames=np.arange(0, 360, 2), interval=100
+)
+
+# Save as mp4 (high quality)
+rot_animation.save(
+    "/home/natasha/Desktop/final_figures/3d_umap_kde_clusters.mp4",
+    writer="ffmpeg", dpi=200
+)
+
+# Or save as GIF
+rot_animation.save(
+    "/home/natasha/Desktop/final_figures/3d_umap_kde_clusters.gif",
+    writer="pillow", dpi=150
+)
+
 
 # %% 2D UMAP with KDE Density and Density Peaks
 
@@ -802,6 +953,28 @@ plt.legend()
 plt.savefig("/home/natasha/Desktop/final_figures/prototypical_waveform.svg", format="svg")  # Save before show
 plt.savefig("/home/natasha/Desktop/final_figures/prototypical_waveform.png", format="png")  # Save before show
 plt.show()
+
+# %% EACH ARCHETYPAL WAVEFORM INDIVIDUALLY
+
+
+
+
+for i, wf in enumerate(prototypical_waveforms):
+    plt.figure(figsize=(10, 7))
+    cluster_id = wf['cluster']
+    segment = wf['segment']
+    color = color_mapping[cluster_id]
+    
+    plt.plot(segment, color=color, linewidth=15)
+
+    # Remove everything but the traces
+    ax = plt.gca()
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    plt.show()
 
 
 # %% ARCHIVE - a bunch of different UMAP plotting and clustering code

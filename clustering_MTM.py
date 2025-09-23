@@ -104,7 +104,7 @@ def calc_mahalanobis_distance_matrix(mtm_session_df):
 # ==============================================================================
 #fixed_cluster_num = np.nan
 fixed_cluster_num = 3
-iterations = 50# Number of times to repeat UMAP reduction #50 for randomization
+iterations = 1# Number of times to repeat UMAP reduction #50 for randomization
 
 
 
@@ -149,6 +149,9 @@ else:
 
     cmap = ListedColormap(custom_colors)
 
+
+g_custom_colors = ['#A9A9A9', '#A9A9A9', '#A9A9A9']
+g_cmap = ListedColormap(g_custom_colors)
 
 # PCA with GMM on a session-by-session basis
 for session in tqdm(df.session_ind.unique()):
@@ -217,7 +220,7 @@ for session in tqdm(df.session_ind.unique()):
         # Extract non-diagonal elements
         diag_elements.extend(np.diagonal(mahal_matrix).tolist())
         # For speed, only create individual session plots for the first iteration
-        '''
+        
         if i == 0:
             
             fig, ax = plt.subplots(figsize=(8, 6))
@@ -267,9 +270,63 @@ for session in tqdm(df.session_ind.unique()):
             plt.savefig(umap_session_path_png)
             umap_session_path_svg = os.path.join(pca_dir, f'session_{session}_umap-of-PCA.svg')
             plt.savefig(umap_session_path_svg)
+            plt.show()
             plt.clf()
 
 
+        if i == 0:
+            
+            fig, ax = plt.subplots(figsize=(8, 6))
+            
+            # Plot the UMAP projections with optimal GMM clusters, using the custom colormap
+            scatter = ax.scatter(
+                embedding_umap[:, 0], embedding_umap[:, 1],
+                c=labels, cmap=g_cmap, s=45,
+                linewidths=0.5, edgecolor = 'black'
+            )
+            ax.set_title(f'Session {session}: UMAP projection of PCA with GMM ({optimal_n_components} clusters)')
+            
+            # Remove all axes
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_frame_on(False)
+            
+            # Add colorbar
+            cbar = plt.colorbar(scatter, ax=ax)
+            cbar.set_ticks([])  # remove ticks
+            
+            # --- Add inset reference axes in bottom-left corner ---
+            xmin, xmax = ax.get_xlim()
+            ymin, ymax = ax.get_ylim()
+            
+            offset_x = (xmax - xmin) * 0.04  # 4% inset from left
+            offset_y = (ymax - ymin) * 0.05  # 5% inset from bottom
+            corner_x, corner_y = xmin + offset_x, ymin + offset_y
+            
+            line_length_x = (xmax - xmin) * 0.10  # 10% of x-range
+            line_length_y = (ymax - ymin) * 0.10  # 10% of y-range
+            
+            # Plot mini-axes
+            ax.plot([corner_x, corner_x + line_length_x], [corner_y, corner_y], color='k', lw=4)  # x-axis
+            ax.plot([corner_x, corner_x], [corner_y, corner_y + line_length_y], color='k', lw=4)  # y-axis
+            
+            # Labels for mini-axes (with slight adjustments)
+            ax.text(corner_x + line_length_x / 2 + (xmax - xmin) * 0.02,   # shift right
+                    corner_y - (ymax - ymin) * 0.015,
+                    'UMAP 1', fontsize=16, ha='center', va='top')
+            
+            ax.text(corner_x - (xmax - xmin) * 0.015,
+                    corner_y + line_length_y / 2 + (ymax - ymin) * 0.02,   # shift up
+                    'UMAP 2', fontsize=16, ha='right', va='center', rotation='vertical')
+            # Save outputs
+            umap_session_path_png = os.path.join(pca_dir, f'bw_session_{session}_umap-of-PCA.png')
+            plt.savefig(umap_session_path_png)
+            umap_session_path_svg = os.path.join(pca_dir, f'bw_session_{session}_umap-of-PCA.svg')
+            plt.savefig(umap_session_path_svg)
+            plt.show()
+            plt.clf()
+
+            '''
             if np.isnan(fixed_cluster_num):
                 # Plot the BIC values, linear regressions, and breakpoint with confidence intervals
                 plt.figure(figsize=(10, 6))  # adjust width, height in inches
