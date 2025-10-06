@@ -6,6 +6,7 @@ Created on Thu Apr  3 10:39:29 2025
 @author: natasha
 """
 
+from file_location_util import load_dirname
 import numpy as np
 import pandas as pd
 import os
@@ -27,7 +28,7 @@ from statannotations.Annotator import Annotator
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
-dirname = '/home/natasha/Desktop/clustering_data/'
+dirname = load_dirname("file_location.txt")
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
 

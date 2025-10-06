@@ -6,7 +6,6 @@ Created on Tue Dec 17 15:13:11 2024
 @author: natasha
 
 This script will overwrie the original data file and remove any multimodal waveforms.
-Save a backup of your raw data first.
 
 """
 
@@ -17,30 +16,36 @@ import umap
 import glob
 from scipy import signal
 from scipy.signal import find_peaks
+from mtm_analysis_config import dirname
 
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
-dirname = '/home/natasha/Desktop/clustering_data/'
-#file_path = os.path.join(dirname, 'mtm_clustering_df.pkl')
 file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl')
 df = pd.read_pickle(file_path)
 
-
 unique_basenames = df['basename'].unique()
-'''
-df.rename_axis("obsolete_idx", inplace=True) # Default Index does not increment by 1. Renaming it.
-df.reset_index(inplace=True) # Make new Index that increments by 1 per row
-'''
+
 # Make a dataframe of just mouth or tongue movement events
-#mtm_bool = df.event_type.str.contains('mouth or tongue movement')
 mtm_bool = df.event_type.str.contains('MTMs')
 mtm_df_all = df.loc[mtm_bool]
 
 
+
 # ==============================================================================
+# Create folder for saving plots
+# ==============================================================================
+multimodal_dir = os.path.join(dirname, 'multimodal_analysis')
+os.makedirs(multimodal_dir, exist_ok=True)
+# Remove any files in new folder
+all_files = glob.glob(os.path.join(multimodal_dir, '*'))
+for file in all_files:
+    os.remove(file)
+
+
+
 # %% Test which waveforms are bimodal (using non-normalized waveforms)
-# Compute the cross-correlation of each wavweform with itself
+# Compute the cross-correlation of each waveform with itself
 # Examine the cross-correlation function (at only positive lag values) for peaks
 # -> Multi-modal waveforms have 1 or more peaks 
 # ==============================================================================
@@ -68,7 +73,7 @@ for index, row in mtm_df_all.iterrows():
         df.loc[index, 'multimodal'] = 'no'
     
     ## Use code below to plot each waveform and its cross-correlation. 
-    ## WARNING: So many waveforms that it takes hours and then crashes 
+    ## WARNING: Too many waveforms - it takes hours and then crashes 
     '''
     fig, (ax_seg, ax_corr) = plt.subplots(2,1, figsize=(7,10))
     ax_seg.plot(row['segment_raw'])
@@ -79,31 +84,19 @@ for index, row in mtm_df_all.iterrows():
     ax_corr.plot(corr_peaks, pos_corr[corr_peaks], "x", markersize=20)
     '''
 perc_multimodal = len(multi_segments)/(len(multi_segments) + len(uni_segments))*100
-print(f"Percent of multimodal waveforms removed of MTMs: {perc_multimodal}")
+print(f"Percent of multimodal waveforms removed out of all MTMs: {perc_multimodal}")
 
-# ==============================================================================
-# %% Overerwrite data file with new dataframe without multimodal segments
+# %% Overwrite data file with multimodal segments removed
 # ==============================================================================
 df_filter_multimodal = df[df['multimodal'] != 'yes'] # Remove multimodal from df
-#df_filter_multimodal = df # Un-comment this line to KEEP multimodal waveforms in the dataframe.
 df_filter_multimodal.to_pickle(file_path) # Overwrite and save dataset
 
 
-# ==============================================================================
-# %% Plots for visualizing uni/multi-modal waveforms
-# ==============================================================================
-# Create folder for saving plots
-multimodal_dir = os.path.join(dirname, 'multimodal_analysis')
-os.makedirs(multimodal_dir, exist_ok=True)
-# Remove any files in new folder
-all_files = glob.glob(os.path.join(multimodal_dir, '*'))
-for file in all_files:
-    os.remove(file)
-    
+# %% Plots for visualizing uni/multimodal waveforms
 # ==============================================================================
 # Plot all uni/multimodal segments overlapped
 # ==============================================================================
-## NB: Using normalized segments just for plotting
+## N.B.: Using normalized segments just for plotting
 fig, (ax_uni, ax_multi) = plt.subplots(2, 1, figsize=(8, 8))
 
 # Plot unimodal segments

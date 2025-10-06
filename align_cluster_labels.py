@@ -10,18 +10,12 @@ import umap
 import numpy as np
 import pandas as pd
 import os
-
 import matplotlib
-#matplotlib.use('Qt4Agg')
 import matplotlib.pyplot as plt
-#plt.ion()
-
-
 import glob
 from scipy.stats import chi2_contingency
 from scipy.stats import zscore
 import seaborn as sns
-#from matplotlib.legend_handler import# WHAT WAS HERE? 
 import shutil
 from scipy.interpolate import make_interp_spline, BSpline
 from scipy.ndimage import gaussian_filter1d  # for smoothing
@@ -34,28 +28,43 @@ import scikit_posthocs as sp
 import pingouin as pg
 from scipy.stats import tukey_hsd
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
-from scipy.stats import sem  # Standard error of the mean
+from scipy.stats import sem 
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 from scipy.stats import gaussian_kde
 import matplotlib.colors as mcolors
 import matplotlib.lines as mlines
+from mtm_analysis_config import dirname
 
-# TODO: I THINK THIS CODE DOESN'T WORK AFTER THE LABELS HAVE BEEN STANDARDIZED ALREADY.
-# MAKE IT RE-RUN-ABLE FRIENDLY
 
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
-dirname = '/home/natasha/Desktop/clustering_data/'
-file_path = os.path.join(dirname, 'clustering_df_update.pkl')
+file_path = os.path.join(dirname, 'clustering_df_update_with_laser.pkl')
 df = pd.read_pickle(file_path)
+
+
+# ==============================================================================
+# Setup folder structure and clear any .png files in folders
+# ============================================================================== 
+# Create folder for saving plots
+label_dir = os.path.join(dirname, 'cluster_label_standardization')
+gapes_dir = os.path.join(label_dir, 'gapes')
+nothing_dir = os.path.join(label_dir, 'nothing')
+
+
+for folder in [label_dir, gapes_dir, nothing_dir]:
+    os.makedirs(folder, exist_ok=True)
+    all_files = glob.glob(os.path.join(folder, '*.png'))
+    for file in all_files:
+        os.remove(file)
+
 
 # ==============================================================================
 # Function to standardize MTM cluster labels
-# Compare cosine similarity of average feature vectors between two test sessions
-# Standardize the labels based on maximizing the sum of cosine similarity values
+# > Compare cosine similarity of average feature vectors between two test sessions
+# > Standardize the labels based on maximizing the sum of cosine similarity values
 # ==============================================================================      
 
 def standardize_labels(this_vector_df, next_basename, processed_basenames):
@@ -114,76 +123,8 @@ def standardize_labels(this_vector_df, next_basename, processed_basenames):
 
     return this_vector_df, processed_basenames
 
-# %%% Plot waveforms per cluster label
-# ==============================================================================
-# Setup folder structure and clear any .png files in folders
-# ============================================================================== 
-# Create folder for saving plots
-label_dir = os.path.join(dirname, 'cluster_label_standardization')
-gapes_dir = os.path.join(label_dir, 'gapes')
-nothing_dir = os.path.join(label_dir, 'nothing')
-
-
-for folder in [label_dir, gapes_dir, nothing_dir]:
-    os.makedirs(folder, exist_ok=True)
-    all_files = glob.glob(os.path.join(folder, '*.png'))
-    for file in all_files:
-        os.remove(file)
-
-        
-# ==============================================================================
-# Setup color map
-# ==============================================================================
-
-# Colros for gapes and no movement is set
-color_mapping = {
-    -1.0: '#ff9900',  # Gapes Color for cluster -1
-    -2.0: '#D3D3D3'   # No movement Color for cluster -2
-}
-
-# Generate unique colors for basenames
-basename_list = df['basename'].unique()
-basename_colors = plt.cm.viridis_r(np.linspace(0, 1, len(basename_list)))
-basename_color_map = dict(zip(basename_list, basename_colors))
-
-
-
-# ==============================================================================
-# Plot waveforms divided cluster and basename
-# ==============================================================================
-cluster_basename_groups = df.groupby(['cluster_num', 'basename'])
-for (cluster, basename), group in cluster_basename_groups:
-    fig, ax = plt.subplots(figsize=(8, 6))
-    
-    # Use predefined colors for -1.0 and -2.0 clusters, otherwise assign colors by basename
-    color = color_mapping.get(cluster, basename_color_map.get(basename, 'black'))
-    
-    for segment in group['segment_raw']:
-        ax.plot(segment, alpha=0.1, color=color)
-    
-    ax.set_title(f'Cluster {cluster} - {basename} Waveforms')
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Amplitude")
-    
-    # Save plot
-    plot_filename = f'{basename}_cluster{cluster}.png'
-    if cluster == -1.0:
-        plot_path = os.path.join(label_dir, 'gapes', plot_filename)
-        plt.savefig(plot_path)
-        plt.close(fig) 
-    elif cluster == -2.0:
-        plot_path = os.path.join(label_dir, 'nothing', plot_filename)
-        plt.savefig(plot_path)
-        plt.close(fig)
-    else:
-        plot_path = os.path.join(label_dir, plot_filename)
-        plt.savefig(plot_path)
-        plt.close(fig)
-
 
 # %% Standardize Cluster Labels
-# ==============================================================================
-# Standardize Cluster Labels
 # ==============================================================================
 
 # Initialize important things
@@ -225,7 +166,7 @@ for basename in unique_basename[1:-1]:
 
 
 # %% Check dataframe is good, then overwrite and save
-
+# ============================================================================== 
 # First testing that 'df' dataframe looks OK
 unique_clusters_by_basename = df.groupby('basename')['new_cluster_num'].unique()
 
@@ -245,167 +186,7 @@ df.to_pickle(file_path) # Overwrite and save dataset
 
 
 
-# %% Plot overlapped waveforms combined per cluster label
-# ==============================================================================
-# Setup folder structure and clear any .png files in folders
-# ============================================================================== 
-# Create folder for saving plots
-overlap_dir = os.path.join(dirname, 'combined_overlap_clusters')
 
-
-for folder in [overlap_dir]:
-    os.makedirs(folder, exist_ok=True)
-    all_files = glob.glob(os.path.join(folder, '*.png'))
-    for file in all_files:
-        os.remove(file)
-
-# Define a color mapping for cluster numbers
-color_mapping = {
-    -1: '#ff9900',      # Gapes Color for cluster -1
-    -2: '#D3D3D3',      # No mvoement Color for cluster 0
-     0: '#4285F4',     # Color for cluster 1
-     1: '#88498F',    # Color for cluster 2
-     2: '#0CBABA'        # Color for cluster 3
-}    
-
-# ==============================================================================
-# Plot waveforms divided cluster and basename
-# TWO DIFFERENT VERSIONS. DECIDING WHICH IS THE BEST
-# ==============================================================================
-
-cluster_basename_groups = df.groupby(['cluster_num'])
-for (cluster), group in cluster_basename_groups:
-    fig, ax = plt.subplots(figsize=(8, 6))
-    
-    # Color map defined above
-    color = color_mapping.get(cluster, basename_color_map.get(cluster, 'black'))
-    
-    waveforms = np.vstack(group['segment_norm_interp'].values)  # Assuming each is a NumPy array of the same length
-    avg_waveform = np.mean(waveforms, axis=0)  # Compute the mean waveform
-
-    
-    for row in group.iterrows():
-        #max_amp = max(row[1]['segment_raw'])
-        #scaling_factor = row[1]['raw_features'][4]
-        #segment = (row[1]['segment_raw'])/max_amp * scaling_factor
-        #ax.plot(segment, alpha=0.1, color=color)
-        ax.plot(row[1]['segment_norm_interp'], alpha=0.1, color=color)
-    
-    ax.plot(avg_waveform, color='black', linestyle='dashed', linewidth=2, label="Average Waveform")
-    
-    ax.set_title(f'Cluster {cluster} Waveforms')
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Amplitude")
-    #ax.set_ylim(0, 20)
-    # Save plot
-    plot_filename = f'norm_cluster{cluster}.png'
-
-    plot_path = os.path.join(overlap_dir, plot_filename)
-    plt.savefig(plot_path)
-    plt.close(fig)
-
-
-
-cluster_basename_groups = df.groupby(['cluster_num'])
-for cluster, group in cluster_basename_groups:
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    # Color map defined above
-    color = color_mapping.get(cluster, basename_color_map.get(basename, 'black'))
-    
-    # List to store normalized waveforms
-    normalized_waveforms = []
-    max_length = 0  # Track max length of waveforms
-    
-    for _, row in group.iterrows():
-        max_amp = max(row['segment_raw'])
-        scaling_factor = row['raw_features'][4]
-        segment = (row['segment_raw']) / max_amp * scaling_factor
-        segment = (row['segment_raw'])
-        max_length = max(max_length, len(segment))  # Update max length
-        normalized_waveforms.append(segment)  # Collect for averaging
-        
-        ax.plot(segment, alpha=0.1, color=color)  # Individual waveforms
-    
-    # Pad waveforms to the same length
-    #padded_waveforms = [np.pad(w, (0, max_length - len(w)), mode='constant') for w in normalized_waveforms]
-    padded_waveforms = [ np.pad(w, ((max_length - len(w)) // 2, (max_length - len(w) + 1) // 2), mode='constant') for w in normalized_waveforms ]
-
-    # Compute and plot the average waveform
-    if padded_waveforms:
-        avg_waveform = np.mean(padded_waveforms, axis=0)  # Compute mean across waveforms
-        ax.plot(avg_waveform, 'k--', linewidth=2, label="Avg Waveform")  # Plot in black dotted line
-    
-    ax.set_title(f'Cluster {cluster} Waveforms')
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Amplitude")
-    ax.set_ylim(0, 500)
-    ax.legend()
-
-    # Save plot
-    plot_filename = f'cluster{cluster}.png'
-    plot_path = os.path.join(overlap_dir, plot_filename)
-    plt.savefig(plot_path)
-    plt.close(fig)
-
-
-
-fig, ax = plt.subplots(figsize=(10, 6))
-filtered_df = df[df['cluster_num'] >= 0]
-
-for cluster, group in filtered_df.groupby(['cluster_num']):
-    color = color_mapping.get(cluster, basename_color_map.get(cluster, 'black'))
-    # Stack waveforms and compute mean & standard error
-    waveforms = np.vstack(group['segment_norm_interp'].values)
-    avg_waveform = np.mean(waveforms, axis=0)  
-    #std_err = sem(waveforms, axis=0)  
-    std_err = np.std(waveforms, axis=0)  # Compute standard deviation
-
-    ax.plot(avg_waveform, color='k', label=f'Cluster {cluster}')
-    ax.fill_between(range(len(avg_waveform)), avg_waveform - std_err, avg_waveform + std_err, color=color, alpha=0.3)
-
-ax.set_title('Cluster Average Waveforms with Standard Error')
-ax.set_xlabel("Time")
-ax.set_ylabel("Amplitude")
-ax.legend()
-plot_path = os.path.join(overlap_dir, 'avg_waveforms.png')
-
-#plt.savefig(plot_path)
-
-plt.show()
-plt.close(fig)
-
-
-
-
-
-fig, ax = plt.subplots(figsize=(10, 6))
-filtered_df = df[df['cluster_num'] >= 0]
-
-# Find max waveform length
-max_length = max(len(w) for w in filtered_df['segment_raw'])
-
-for cluster, group in filtered_df.groupby(['cluster_num']):
-    color = color_mapping.get(cluster, basename_color_map.get(cluster, 'black'))
-
-    # Pad waveforms evenly at the beginning and end
-    waveforms = [
-        np.pad(w, ((max_length - len(w)) // 2, (max_length - len(w)) - (max_length - len(w)) // 2), mode='constant')
-        for w in group['segment_raw']
-    ]
-    waveforms = np.vstack(waveforms)
-
-    # Compute mean waveform
-    avg_waveform = np.mean(waveforms, axis=0)
-
-    ax.plot(avg_waveform, color=color, label=f'Cluster {cluster}')
-
-ax.set_title('Cluster Average Waveforms')
-ax.set_xlabel("Time")
-ax.set_ylabel("Amplitude")
-ax.legend()
-plt.show()
-plt.close(fig)
 
 # %% Different clusering within UMAP
 

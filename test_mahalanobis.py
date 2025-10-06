@@ -10,31 +10,36 @@ import numpy as np
 from scipy import stats
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
-# -------------------------------
-# Load data
-# -------------------------------
-file_path = '/home/natasha/Desktop/clustering_data/mahalanobis_data.pkl'
+import os
+from mtm_analysis_config import dirname
+
+# ==============================================================================
+# Load and setup data
+# ==============================================================================
+file_path = os.path.join(dirname, 'mahalanobis_data.pkl')
 mahal_data = pd.read_pickle(file_path)
 
 diag_elements = mahal_data[mahal_data['group'] == 'diag']['value']
 non_diag_elements = mahal_data[mahal_data['group'] == 'non_diag']['value']
 
-# -------------------------------
-# Stats: KS
-# -------------------------------
+final_figures_dir = os.path.join(dirname, "final_figures")
 
+
+# %% Stats: KS
+# ==============================================================================
 ks_stats = stats.kstest(diag_elements, non_diag_elements)
 
 if ks_stats.pvalue < 0.05:
     print("Diagonal distances statistically different from non-diagonal")
     print(f"pvalue: {ks_stats.pvalue}, KS Statistic (D): {ks_stats.statistic}")
 else:
-    print("Warning: diagonal distances NOT statistically different from non-diagonal")
+    print("⚠ Warning: diagonal distances NOT statistically different from non-diagonal")
 
-# -------------------------------
+
+# %% Plotting distribution histogram and box plots
+# ==============================================================================
 # Plot - distribution histogram
-# -------------------------------
+# ==============================================================================
 # Define bins
 bin_edges = np.linspace(mahal_data['value'].min(), mahal_data['value'].max(), num=31)
 plt.figure(figsize=(10, 8))
@@ -48,14 +53,16 @@ plt.xlabel('Values')
 plt.ylabel('Frequency')
 plt.title('Frequency Distribution')
 plt.legend()
-plt.savefig("/home/natasha/Desktop/final_figures/mahalanobis_distance.svg", format="svg")  # Save before show
-plt.savefig("/home/natasha/Desktop/final_figures/mahalanobis_distance.png", format="png")  # Save before show
+
+for ext in ["svg", "png"]:
+    plt.savefig(os.path.join(final_figures_dir, f"mahalanobis_distance_hist.{ext}"), format=ext)
+
 plt.show()
 
 
-# -------------------------------
+# ==============================================================================
 # Plot - box plots
-# -------------------------------
+# ==============================================================================
 # Combine data
 data_to_plot = [diag_elements, non_diag_elements]
 labels = ['Diagonal', 'Non-Diagonal']
@@ -73,16 +80,17 @@ box = plt.boxplot(data_to_plot, labels=labels, patch_artist=True,
 plt.ylabel('Values')
 plt.xlabel('Mahalanobis Distances')
 
+if ks_stats.pvalue < 0.001:
+    # --- Add significance bar ---
+    y_max = max(max(diag_elements), max(non_diag_elements))
+    bar_height = y_max + 0.05 * y_max  # a little above the tallest box
+    plt.plot([1, 2], [bar_height, bar_height], color='black', lw=2)  # horizontal bar
+    plt.text(1.5, bar_height + 0.005*y_max, '***', ha='center', va='bottom', fontsize=24)
+    plt.ylim(top=bar_height + 0.08*y_max)
+    
+for ext in ["svg", "png"]:
+    plt.savefig(os.path.join(final_figures_dir, f"mahalanobis_distance_boxplot.{ext}"), format=ext)
 
-# --- Add significance bar ---
-y_max = max(max(diag_elements), max(non_diag_elements))
-bar_height = y_max + 0.05 * y_max  # a little above the tallest box
-plt.plot([1, 2], [bar_height, bar_height], color='black', lw=2)  # horizontal bar
-plt.text(1.5, bar_height + 0.005*y_max, '***', ha='center', va='bottom', fontsize=24)
-plt.ylim(top=bar_height + 0.08*y_max)
-
-plt.savefig("/home/natasha/Desktop/final_figures/mahalanobis_distance_boxplot_sig.svg", format="svg")
-plt.savefig("/home/natasha/Desktop/final_figures/mahalanobis_distance_boxplot_sig.png", format="png")
 plt.show()
 
 

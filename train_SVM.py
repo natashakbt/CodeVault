@@ -6,6 +6,7 @@ Created on Thu Aug 28 13:21:58 2025
 @author: natasha
 """
 
+from file_location_util import load_dirname
 import numpy as np
 import pandas as pd
 import os
@@ -20,7 +21,7 @@ from tqdm import tqdm
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
-dirname = '/home/natasha/Desktop/clustering_data/'
+dirname = load_dirname("file_location.txt")
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
 
@@ -59,7 +60,7 @@ features_expanded = features_expanded.loc[features_expanded['cluster_num'] >= 0]
 
 session_ind = features_expanded['session_ind'].unique()
 
-sample_frac = 1  # 30% of the training data
+sample_frac = 1  # for speed, can use a fraction of the training data to train. Minimum suggested is 0.3 (30%)
 accuracy_scores = []
 confusion_matrices = []
 # Train the classifier 10x

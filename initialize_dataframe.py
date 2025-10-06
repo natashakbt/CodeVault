@@ -8,15 +8,41 @@ Created on Tue Jul  8 11:14:45 2025
 
 import pandas as pd
 import os
+from mtm_analysis_config import dirname, xgb_predictions_filename
 
 # ==============================================================================
 # Load data
 # ==============================================================================
-
-dirname = '/home/natasha/Desktop/clustering_data/'
 #file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl') # all events from classifier predictions
-file_path = os.path.join(dirname, 'all_datasets_emg_pred-TEST.pkl') # all events from classifier predictions
+file_path = os.path.join(dirname, xgb_predictions_filename) # all events from classifier predictions
 df = pd.read_pickle(file_path)
+
+# ==============================================================================
+# Create a backup of the original data
+# ==============================================================================
+
+
+answer = input("Do you want to create a backup of the original data? (y/n): ").strip().lower()
+
+
+if answer in ("y", "yes"):
+    
+    # Make sure backup folder exists
+    backup_dir = os.path.join(dirname, '_original_data_backup')
+    os.makedirs(backup_dir, exist_ok=True)
+
+    # Insert '_backup' before the file extension
+    base, ext = os.path.splitext(xgb_predictions_filename)
+    backup_filename = f"{base}_backup{ext}"
+    backup_file_path = os.path.join(backup_dir, backup_filename)
+    '''
+    df.to_pickle(backup_file_path)
+    '''
+    print(f"✅ Backup saved to: {backup_file_path}")
+    
+else:
+    print("⚠️ Backup skipped.")
+
 
 # ==============================================================================
 # Cleanup data
@@ -62,4 +88,10 @@ df.to_pickle(output_file_path)
 
 print(f"DataFrame successfully saved to {output_file_path}")
 
+
+# ==============================================================================
+# Make sure there is a folder final_figures - generally publication figures
+# ==============================================================================
+final_figures_dir = os.path.join(dirname, "final_figures")
+os.makedirs(final_figures_dir, exist_ok=True)
 

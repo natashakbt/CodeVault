@@ -5,6 +5,7 @@ Created on Mon Aug 25 10:08:46 2025
 
 @author: natasha
 """
+
 import os
 import matplotlib.patches as patches
 import seaborn as sns
@@ -12,23 +13,23 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import random
 from scipy.stats import wilcoxon
+from mtm_analysis_config import dirname
 
-dirname = '/home/natasha/Desktop/clustering_data/'
+# ==============================================================================
+# load data
+# ==============================================================================
 file_path = os.path.join(dirname, 'UMAP_of_all_MTMs_plot_df.pkl') # all events from classifier predictions
 plot_df = pd.read_pickle(file_path)
 
+final_figures_dir = os.path.join(dirname, "final_figures")
 
 
-desktop_path = os.path.join(os.path.expanduser("~"), "Desktop/final_figures")
-save_path = os.path.join(desktop_path, "divergence_pvalues_plot.svg")
+# %% Plot p-value results from divergence test
+# ==============================================================================
 
-
-# %% Plot
-
-# Get axis
 fig, ax = plt.subplots(figsize=(12, 9))
 
-# Stripplot with gray dots + black outline
+# Stripplot where dots are p-value results
 sns.stripplot(
     data=plot_df,
     x='session_id', y='divergence_p',
@@ -37,7 +38,7 @@ sns.stripplot(
     ax=ax
 )
 
-# Boxplot overlay
+# Boxplot overlay to show distribution of results for each session
 sns.boxplot(
     data=plot_df,
     x='session_id', y='divergence_p',
@@ -46,11 +47,11 @@ sns.boxplot(
     ax=ax
 )
 
-# Add rainbow background rectangles 
-# Find colors in rainbow palette and shuffle so it's not a smooth gradient
+# Add rainbow background rectangles indicatin sessions belonging to the same rat
+# Pick colors in rainbow palette then shuffle so it's not a smooth gradient
 rats = sorted(plot_df['rat'].unique())  # stable order of rats
 palette = sns.color_palette("rainbow", n_colors=len(rats))
-random.seed(55)  # ensures consistent shuffle every run
+random.seed(55)  # ensure consistent shuffle every run
 random.shuffle(palette)
 rat_colors = {rat: color for rat, color in zip(rats, palette)}
 
@@ -84,10 +85,16 @@ ax.set_xlabel("session_id", fontsize=18, labelpad=10)
 ax.tick_params(axis='y', labelsize=14)
 
 # Save
-plt.savefig(save_path, format='svg', bbox_inches='tight')
+for ext in ["svg", "png"]:
+    plt.savefig(os.path.join(final_figures_dir, f"divergence_pvalues_plot.{ext}"), 
+                format=ext, bbox_inches='tight')
+
 plt.show()
 
+
 # %% Wilcoxon stats
+# ==============================================================================
+
 results = []
 
 for session_id, group in plot_df.groupby("session_id"):
