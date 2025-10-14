@@ -45,6 +45,7 @@ for file in all_files:
 
 
 # %% Test which waveforms are bimodal (using non-normalized waveforms)
+# ==============================================================================
 # Compute the cross-correlation of each waveform with itself
 # Examine the cross-correlation function (at only positive lag values) for peaks
 # -> Multi-modal waveforms have 1 or more peaks 

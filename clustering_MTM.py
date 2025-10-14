@@ -102,7 +102,6 @@ def calc_mahalanobis_distance_matrix(mtm_session_df):
 # ==============================================================================
 # Set color maps
 # ==============================================================================
-fixed_cluster_num = 3
 
 if not np.isnan(fixed_cluster_num):
     # Keep only keys >= 0 and sort by key
@@ -124,7 +123,7 @@ if not np.isnan(fixed_cluster_num):
             tab10 = plt.get_cmap("Accent")
             for i in range(tab10.N):
                 color = tab10(i)  # RGBA tuple
-                if color not in custom_colors:  # Compare RGBA directly
+                if color not in custom_colors:
                     custom_colors.append(color)
             cmap = ListedColormap(custom_colors)
 

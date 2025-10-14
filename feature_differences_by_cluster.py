@@ -6,45 +6,26 @@ Created on Thu Apr  3 10:39:29 2025
 @author: natasha
 """
 
-from file_location_util import load_dirname
 import numpy as np
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
-from sklearn import svm 
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import GridSearchCV, StratifiedShuffleSplit
-from sklearn.svm import SVC
-from sklearn.model_selection import train_test_split
-from sklearn import metrics
-from sklearn.metrics import confusion_matrix
 from scipy import stats
 from tqdm import tqdm
 import seaborn as sns
 import scikit_posthocs as sp
 from scipy.stats import mannwhitneyu
 from statannotations.Annotator import Annotator
+from mtm_analysis_config import dirname, feature_names, color_mapping
+from scipy.signal import find_peaks
+
 
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
-dirname = load_dirname("file_location.txt")
+
 file_path = os.path.join(dirname, 'clustering_df_update.pkl')
 df = pd.read_pickle(file_path)
-
-
-feature_names = [
-    "duration",
-    "left_interval",
-    "right_interval",
-    "max_freq",
-    "amplitude_norm",
-    "pca_0",
-    "pca_1",
-    "pca_2",
-    
-]
-
 
 features_expanded = pd.DataFrame(df["features"].tolist(), index=df.index, columns=feature_names)
 # Add cluster_num column at the front
@@ -85,13 +66,13 @@ pairs = [
 for name, group1, group2 in pairs:
     u_stat, p_value = mannwhitneyu(group1, group2, alternative='two-sided')
     print(f"{name}: U={u_stat}, p={p_value:.4f}")
-    
+    '''
 color_mapping = {
     0: '#4285F4',
     1: '#88498F',
     2: '#0CBABA'
 }
-
+'''
 # ==============================================================================
 # PC0 - plotting
 # ==============================================================================
@@ -122,6 +103,7 @@ svg_pc0_plot = os.path.join('/home/natasha/Desktop/final_figures', 'pc0_boxplot.
 plt.savefig(png_pc0_plot)
 plt.savefig(svg_pc0_plot)
 plt.show()
+
 
 # %%
 # ==============================================================================
@@ -209,7 +191,7 @@ for feature in feature_names:
 
 waveform_metrics_df = df
 new_columns = ['amplitude', 'area', 'width', 
-               'pos_grad', 'neg_grad', 'symmetry', 'skew']
+               'pos_grad', 'neg_grad', 'symmetry', 'skew', 'bimod_test']
 waveform_metrics_df[new_columns] = np.nan
 
 for index, row in tqdm(waveform_metrics_df.iterrows()):
@@ -244,6 +226,24 @@ for index, row in tqdm(waveform_metrics_df.iterrows()):
     falling_slopes = slopes[peak_index:]
     avg_falling_slope = np.mean(falling_slopes)
     waveform_metrics_df.at[index, 'neg_grad'] = avg_falling_slope
+
+    # Test bimodality
+    peaks, _ = find_peaks(waveform, prominence=np.max(waveform)*0.1)  # adjust threshold as needed
+    
+    if len(peaks) == 0:
+        print('blah')
+        continue
+    
+    first_peak_idx = peaks[0]
+    seg_after_peak = waveform[first_peak_idx:]
+    
+    derivative = np.gradient(seg_after_peak)
+    positive_deriv_sum = np.sum(derivative[derivative > 0])
+
+    waveform_metrics_df.at[index, 'bimod_test'] = positive_deriv_sum
+
+
+
 
 # ==============================================================================
 # Plots of metrics + stats
@@ -289,29 +289,54 @@ for metric in tqdm(new_columns):
 
     if p_value < 0.05 :
         if epsilon_squared > 0.16:  # Only proceed if Kruskal-Wallis is significant
-            print(f"{feature} p-value: {p_value}")
-            print(f"H-stat {h_stat.round(3)}, effect size: {epsilon_squared.round(4)}")
+            print(f"{metric} p-value: {p_value}")
+            print(f"H-stat {H.round(3)}, effect size: {epsilon_squared.round(4)}")
             effect_size = 'relatively strong'
         elif epsilon_squared > 0.04:  # Only proceed if Kruskal-Wallis is significant
-            print(f"{feature} p-value: {p_value}")
-            print(f"H-stat {h_stat.round(3)}, effect size: {epsilon_squared.round(4)}")
+            print(f"{metric} p-value: {p_value}")
+            print(f"H-stat {H.round(3)}, effect size: {epsilon_squared.round(4)}")
             effect_size = 'moderate'
         elif epsilon_squared > 0.01:
-            print(f'{feature} is signficiant ({p_value}) but weak effect size ({epsilon_squared.round(4)})')
+            print(f'{metric} is signficiant ({p_value}) but weak effect size ({epsilon_squared.round(4)})')
             effect_size = 'weak'
             
         else:
-            print(f'{feature} is signficiant ({p_value}) but inconsequential effect size')
+            print(f'{metric} is signficiant ({p_value}) but inconsequential effect size')
             effect_size = 'negligible'
     else:
-        print(f'{feature} not significant ({p_value})')
+        print(f'{metric} not significant ({p_value})')
         effect_size = 'n/a'
     print('\n')
     feature_results.loc[len(feature_results)] = [metric, H, p, epsilon_squared, effect_size]
 
+
+# %%
+
+
+# Add a tiny offset to avoid zeros
+#subset_df['bimod_test_log'] = subset_df['bimod_test'] + 1e-6
+
+plt.figure(figsize=(10,7))
+ax = sns.boxplot(
+    data=subset_df,
+    x='cluster_num', y='bimod_test',
+    hue='cluster_num',
+    linewidth=3,
+    palette=color_mapping
+)
+
+ax.set_yscale('log')
+#ax.set_ylim(1e-6, subset_df['bimod_test'].max()*1.2)
+plt.xlabel('Cluster')
+plt.ylabel('Positive derivative sum (log scale)')
+plt.show()
+
 # %% Save statistical results
 feature_results.to_csv('/home/natasha/Desktop/clustering_data/feature_results.csv', index=False)
 
+
+# %% ARCHIVE OLD CODE
+'''
 # %% MEASURING WAVEFORM METRICS - CLUSTER SPECIFIC- IF THEY CHANGE BY 'before' VS 'after' EVENT_POSITION
 # ==============================================================================
 # Setup dataframe with event position (fixed time 800ms after taste delivery)
@@ -396,193 +421,6 @@ for cluster_num in cluster_num_i_care_about:
             else:
                 print(f"{metric} insignificant")
 
-        
+'''    
 
 
-# %% ARCHIVE OLD CODE
-'''
-# %% TRAINING SVM + PLOTTING CONFUSION MATRIX - OLD
-# ==============================================================================
-# Training SVM (80/20 split)
-# ==============================================================================
-
-
-all_high_conf_waveforms = []
-
-accuracy_scores = []
-confusion_matrices = []
-# Train the classifier 10x
-for i in tqdm(range(10)):
-    # Split the dataset into 80% training and 20% testing
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y)
-    
-    test_indices = X_test.index
-    
-    rbf_svc = svm.SVC(kernel='rbf', probability=True) # Non-linear
-    rbf_svc.fit(X_train, y_train)
-    
-    y_pred = rbf_svc.predict(X_test) 
-    y_proba = rbf_svc.predict_proba(X_test)
-
-    #print("Accuracy:", metrics.accuracy_score(y_test, y_pred))
-    accuracy_scores.append(metrics.accuracy_score(y_test, y_pred))
-    
-    matrix = confusion_matrix(y_test, y_pred, normalize='pred')
-    confusion_matrices.append(matrix)
-    
-    if i == 1:
-        plt.imshow(matrix)
-        plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
-        plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
-    
-        plt.xlabel("Predicted Cluster Labels")
-        plt.ylabel("True Cluster Labels")
-        cbar = plt.colorbar()
-        cbar.set_label('Normalized Accuracy')
-        
-        plt.show()
-    
-    # Pulling out the most confident (>90) waveforms. For plotting below
-    confidences = np.max(y_proba, axis=1)
-    high_conf_mask = confidences >= 0.9
-    
-    # Get original indices for high-confidence predictions
-    high_conf_indices = test_indices[high_conf_mask]
-    
-    # Pull the waveforms from df
-    waveforms = df.loc[high_conf_indices, 'segment_norm_interp']
-    waveforms = df.loc[high_conf_indices, 'segment_raw']
-    
-    waveform_data = pd.DataFrame({
-        'waveform': waveforms,
-        'true_label': y_test.loc[high_conf_indices].values,
-        'pred_label': y_pred[high_conf_mask],
-        'confidence': confidences[high_conf_mask]
-    })
-    all_high_conf_waveforms.append(waveform_data)
-
-# ==============================================================================
-# Plotting waveforms
-# ==============================================================================
-
-final_waveforms_df = pd.concat(all_high_conf_waveforms, ignore_index=True)
-final_waveforms_df = final_waveforms_df[
-    final_waveforms_df['true_label'] == final_waveforms_df['pred_label']
-]
-
-mean_waveforms = []
-# Group waveforms by true_label
-for label in sorted(final_waveforms_df['true_label'].unique()):
-    group = final_waveforms_df[final_waveforms_df['true_label'] == label]
-    print(len(group))
-    plt.figure(figsize=(8, 4))
-    for waveform in group['waveform']:
-        plt.plot(waveform, alpha=0.2, color='gray')
-    
-    # Optionally: Add mean waveform
-    mean_waveform = np.mean(np.stack(group['waveform'].values), axis=0)
-    mean_waveforms.append(mean_waveform)
-    
-   #plt.plot(mean_waveform, color='black', linewidth=2, label='Mean waveform')
-    
-    plt.title(f"Overlayed Waveforms for Cluster {label}")
-    plt.tight_layout()
-    plt.show()
-
-for w in mean_waveforms:
-    plt.plot(w)
-plt.title("Mean of 90% confidence waveforms")
-plt.show()
-
-
-
-
-# TAKE TOP 10 CONFIDENCE WAVEFORMS IN EACH CLUSTER AND PLOT
-top_waveforms_by_cluster = []
-
-for label in sorted(final_waveforms_df['pred_label'].unique()):
-    top10 = (
-        final_waveforms_df[final_waveforms_df['pred_label'] == label]
-        .sort_values(by='confidence', ascending=False)
-        .head(10)
-    )
-    top_waveforms_by_cluster.append(top10)
-
-# Combine into one DataFrame
-top_waveforms_df = pd.concat(top_waveforms_by_cluster)
-
-
-
-# Loop through each predicted cluster
-for label in sorted(final_waveforms_df['pred_label'].unique()):
-    # Get top 10 waveforms for this cluster by confidence
-    top10 = (
-        final_waveforms_df[final_waveforms_df['pred_label'] == label]
-        .sort_values(by='confidence', ascending=False)
-        .head(10)
-    )
-
-    plt.figure(figsize=(8, 4))
-    
-    for i, waveform in enumerate(top10['waveform']):
-        plt.plot(waveform, alpha=0.8, label=f"Waveform {i+1}", color='k')
-    
-    plt.title(f"Top 10 Most Confident Waveforms (Predicted Cluster {label})")
-
-    plt.tight_layout()
-    plt.show()
-
-# ==============================================================================
-# Confusion matrix + stat of SVM accuracy
-# ==============================================================================
-
-
-# Building average confusion matrix and std
-matrices_as_array = np.array(confusion_matrices)
-average_matrix = matrices_as_array.mean(axis=0)
-std_matrix = matrices_as_array.std(axis=0)
-
-# Plot the average confusion matrix with black and white colormap
-plt.figure(figsize=(10, 10))  # Adjust size as needed
-plt.imshow(average_matrix, cmap='Greys_r')
-
-# Set tick labels
-plt.xticks(ticks=np.arange(3), labels=[0, 1, 2])
-plt.yticks(ticks=np.arange(3), labels=[0, 1, 2])
-
-# Axis labels
-plt.xlabel("Predicted Cluster Labels")
-plt.ylabel("True Cluster Labels")
-
-# Add text annotations to each cell
-for i in range(average_matrix.shape[0]):
-    for j in range(average_matrix.shape[1]):
-        mean_val = average_matrix[i, j]
-        std_val = std_matrix[i, j]
-        
-        #text = f"{mean_val:.2f}\n±{std_val:.2f}"
-        text = f"{mean_val:.2f}"
-        text_color = 'black' if mean_val > 0.6 else 'white'
-        
-        plt.text(j, i, text, ha='center', va='center',
-                 color=text_color, fontsize=40, fontweight='bold')
-
-
-# Add title
-plt.title("Average Confusion Matrix")
-
-# Show the plot
-plt.tight_layout()
-
-# Save the plot
-plt.savefig("/home/natasha/Desktop/final_figures/my_plot.svg", format="svg")
-plt.show()
-# Perform a one-sample t-test
-t_stat, p_value = stats.ttest_1samp(accuracy_scores, 0.3)
-if p_value < 0.05:
-    print(f'The mean accuracy is significantly above 0.3 (p-value: {p_value})')
-else:
-    print('The mean accuracy is not significantly different from chance!')
-
-'''

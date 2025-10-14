@@ -290,7 +290,7 @@ files = glob.glob(os.path.join(single_clust_dir, '*'))
 for file in files:
     os.remove(file)
     
-desired_clust_to_plot = 1 # which cluster_num to plot?
+desired_clust_to_plot = -1 # which cluster_num to plot?
 
 # Group by basename (session) and taste
 grouped = transition_events_df.groupby(['basename', 'taste_num'])
@@ -347,15 +347,15 @@ for (basename, taste), taste_group in grouped:
     ax_raster.set_xlim([-window_len, window_len])
     ax_raster.axvline(0, color='k', linestyle='--')
     ax_raster.set_ylabel('Trial')
-    ax_raster.set_xlabel('Time (ms)')
+    ax_raster.set_xlabel('Time from avg. palatability transition (ms)')
 
-    plt.suptitle(f'{basename}')
-    if basename == 'nb32_test2_4tastes_240203_121309' and taste == 1:
+    plt.suptitle(f'{basename}\ntaste={taste}, cluster={desired_clust_to_plot}')
+    if basename == 'nb32_test2_4tastes_240203_121309' and taste == 0:
         plt.savefig('/home/natasha/Desktop/final_figures/raster_plot.svg')
         plt.savefig('/home/natasha/Desktop/final_figures/raster_plot.png')
         plt.show()
-    png_path = os.path.join(single_clust_dir, f"{taste_name}_{basename}_transitions.png")
-    svg_path = os.path.join(single_clust_dir, f"{taste_name}_{basename}_transitions.svg")
+    png_path = os.path.join(single_clust_dir, f"{taste}_{basename}_transitions.png")
+    svg_path = os.path.join(single_clust_dir, f"{taste}_{basename}_transitions.svg")
     plt.savefig(png_path)
     plt.savefig(svg_path)
     plt.close()

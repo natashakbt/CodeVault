@@ -31,3 +31,15 @@ color_mapping = {
 }    
 
 extra_colors = []
+
+
+feature_names = [
+    "duration",
+    "left_interval",
+    "right_interval",
+    "max_freq",
+    "amplitude_norm",
+    "pca_0",
+    "pca_1",
+    "pca_2",
+]
