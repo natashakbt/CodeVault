@@ -257,18 +257,18 @@ for metric in tqdm(new_columns):
     groups = [subset_df[subset_df['cluster_num'] == label][metric] for label in [0, 1, 2]]
     
     # Kruskal-Wallis test
-    H, p = stats.kruskal(*groups)
+    H, p_value = stats.kruskal(*groups)
     n = len(subset_df)
     k = len(groups)
     epsilon_squared = (H - k + 1) / (n - k)
     results.append({'metric': metric, 
                     'kruskal_H': H,
-                    'kruskal_p': p,
+                    'kruskal_p': p_value,
                     'epsilon_squared': epsilon_squared
                     })
 
     print(f"\n🔍 {metric}")
-    print(f"Kruskal-Wallis p-value: {p:.4f}")
+    print(f"Kruskal-Wallis p-value: {p_value:.4f}")
     #print(f"Epsilon-squared (effect size): {epsilon_squared:.4f}")
     
     if epsilon_squared < 0.01:
@@ -278,7 +278,7 @@ for metric in tqdm(new_columns):
     elif epsilon_squared < 0.16:
         print("moderate effect")
     # If significant, do post-hoc Dunn test
-    if p < 0.05:
+    if p_value < 0.05:
         print("→ Running post-hoc Dunn's test:")
         posthoc = sp.posthoc_dunn(subset_df, val_col=metric, group_col='cluster_num')
         #print(posthoc)
@@ -307,7 +307,7 @@ for metric in tqdm(new_columns):
         print(f'{metric} not significant ({p_value})')
         effect_size = 'n/a'
     print('\n')
-    feature_results.loc[len(feature_results)] = [metric, H, p, epsilon_squared, effect_size]
+    feature_results.loc[len(feature_results)] = [metric, H, p_value, epsilon_squared, effect_size]
 
 
 # %%
