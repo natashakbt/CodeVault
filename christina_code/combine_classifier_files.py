@@ -142,22 +142,27 @@ df['taste_name'] = df['taste_name'].replace('sac', 'saccharin')
 df['taste_name'] = df['taste_name'].replace('quinine', 'qhcl')
 #df['taste_name'] = df['taste_name'].replace('quinc', 'qhcl')
 
+
+
 final_test_day_num = df['num_of_cta'].max() + 1
 df['num_of_cta'] = df['num_of_cta'].replace(np.nan, final_test_day_num)
 print(f"Final test day is numbered as {final_test_day_num} under 'num_of_cta' column")
 
 
+# Changing taste name for a specific animal that got incorrectly labeled
 mask = (df['animal_num'] == 'CM42') & (df['taste_name'] == 'highqhcl')
-
-# Step 1: check if taste_conc only has one unique value
+# check if taste_conc only has one unique value
 unique_concs = df.loc[mask, 'taste_conc'].dropna().unique()
 if len(unique_concs) == 1:
-    # Step 2: rename highqhcl → qhcl
+    # rename highqhcl → qhcl
     df.loc[mask, 'taste_name'] = 'qhcl'
     print("For CM42, renamed highqhcl → qhcl")
 else:
     print("Multiple qhcl concentrations found for CM42 — not renaming.")
 
+# Changing taste name for a specific animal that got incorrectly labeled
+mask = (df['basename'] == 'CM74_CTATrain2') & (df['taste_name'] == 'water')
+df = df[~mask]
 
 
 # ==============================================================================
