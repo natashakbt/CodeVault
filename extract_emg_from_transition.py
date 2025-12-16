@@ -551,7 +551,7 @@ for (row_val, col_val), ax in g.axes_dict.items():
     pvalue_for_now = res_row['poisson_pvalue']
     stat_for_now = res_row['poisson_stat']
     print(f'{row_val} {col_val}: {pvalue_for_now} and {stat_for_now}')
-    print('/n')
+    print(' ')
     if len(res_row) == 0:
         label = "No data"
         ax.text(0.05, 0.95, label, transform=ax.transAxes,
@@ -599,6 +599,100 @@ plt.savefig(f"/home/natasha/Desktop/final_figures/violinplot.svg", format="svg",
 plt.savefig(f"/home/natasha/Desktop/final_figures/violinplot.png", format="png", bbox_inches="tight", dpi=300)
 
 plt.show()
+
+
+# %% TEST_- IGNORE THIS
+
+subset_filtered = count_df[(count_df['basename'] == 'km50_5tastes_emg_210911_104510_copy') &
+                           (count_df['taste_name'].isin(['qhcl', 'suc']))]
+
+g = sns.FacetGrid(subset_filtered, row='taste_name', col='cluster_num', margin_titles=True, sharey=True)
+g.map_dataframe(
+    sns.barplot,
+    x='event_position',
+    y='movement_count',
+    hue='event_position',
+    palette=custom_palette,
+    legend=False
+)
+
+# Add this:
+g.map_dataframe(
+    sns.stripplot,
+    x='event_position',
+    y='movement_count',
+    color='black',
+    dodge=False,
+    alpha=0.6,
+    jitter=0.15,
+    size=7
+)
+
+for (row_val, col_val), ax in g.axes_dict.items():
+    subsub = subset_filtered[
+        (subset_filtered['cluster_num'] == col_val) &
+        (subset_filtered['taste_name'] == row_val)
+    ]
+    basename_val = subset_filtered['basename'].iloc[0]
+
+    res_row = session_trial_results_df[
+        (session_trial_results_df['cluster_num'] == col_val) &
+        (session_trial_results_df['taste'].isin(['qhcl', 'suc'])) &
+        (session_trial_results_df['basename'] == basename_val) &
+        (session_trial_results_df['taste'] == row_val)
+    ]
+    pvalue_for_now = res_row['poisson_pvalue']
+    stat_for_now = res_row['poisson_stat']
+    print(f'{row_val} {col_val}: {pvalue_for_now} and {stat_for_now}')
+    print(' ')
+    if len(res_row) == 0:
+        label = "No data"
+        ax.text(0.05, 0.95, label, transform=ax.transAxes,
+                ha='left', va='top', fontsize=8,
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='gray', alpha=0.7))
+    else:
+        pval = res_row['poisson_pvalue'].iloc[0]
+       
+        if pval < 0.001:
+            sig_label = '***'
+        elif pval < 0.01:
+            sig_label = '**'
+        elif pval < 0.05:
+            sig_label = '*'
+        else:
+            sig_label = 'ns'
+
+        if pval < 0.05:
+            y_bar = 6      # fixed bar height
+            y_text = 6.2   # text slightly above the bar
+        
+            ax.plot([0, 0, 1, 1], [y_bar, y_bar, y_bar, y_bar],
+                    lw=1.2, c='black')
+            ax.text(0.5, y_text, sig_label, ha='center', va='bottom', fontsize=10)
+
+            
+# Remove x-axis tick labels for all subplots
+for ax in g.axes.flat:
+    ax.set_xticklabels(['Before', "After"])  # remove tick labels
+    ax.set_xlabel('')       # remove per-axis label
+    #ax.set_title(['Gapes', "Subtype #1", "Subtype #2", "Subtype #3"])
+
+custom_titles = ['', "MTM #1", "MTM #2", "MTM #3"]
+for ax, title in zip(g.axes[0], custom_titles):
+    ax.set_title(title)
+    
+# Add one shared x-axis label at the bottom
+g.fig.text(0.625, 1.02, "Mouth or Tongue Movements (MTMs)", ha='center', fontsize=12)
+g.fig.text(0.15, 1.02, "Gapes", ha='center', fontsize=12)
+
+#g.fig.suptitle(f'Basename: {basename}', y=1.02)
+
+safe_basename = basename.replace('/', '_')
+plt.savefig(f"/home/natasha/Desktop/final_figures/violinplot.svg", format="svg", bbox_inches="tight", dpi=300)
+plt.savefig(f"/home/natasha/Desktop/final_figures/violinplot.png", format="png", bbox_inches="tight", dpi=300)
+
+plt.show()
+
 
     
 # %% PLOT: REAL P-VALUE DISTRIBUTION AGAINST RANDOMIZED DATA

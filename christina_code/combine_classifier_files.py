@@ -1,10 +1,34 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 """
 Created on Fri Oct 31 14:25:23 2025
-
 @author: natasha
+
+This script loads and combines EMG segment data across sessions and experimental
+conditions into a single dataframe saved as:
+    `christina_all_datasets.pkl`
+
+Expected directory structure:
+
+raw_data/
+├── experimental_condition_1/
+│   ├── basename_emg_classifier_segments.pkl
+│   └── ...
+├── experimental_condition_2/
+│   └── ...
+├── etc/
+└── all_info_files/
+    ├── basename.info
+    └── ...
+
+Notes:
+- Each experimental condition directory contains EMG segment files per session from XGB classifier.
+- `all_info_files` contains metadata info files across all conditions.
+- The basename of each `.info` file must match the basename of its corresponding
+  EMG segment file.
 """
+
 import numpy as np
 import pandas as pd
 import os
@@ -12,6 +36,7 @@ import json
 from pathlib import Path
 import re
 from tqdm import tqdm
+
 # ==============================================================================
 # Load data
 # ==============================================================================
@@ -21,7 +46,9 @@ segment_folders = ['0.15M_LiCl_segments', '0.6M_LiCl_segments',
                    '0.15M_NaCl_segments', '0.6M_NaCl_segments',
                    '1train_1test_0.8QHCl_segments', '1train_1test_1QHCl_segments',
                    '2train_1test_segments'
-                   ]
+                   ] # each folder corresponds to an experimnetal condition and contains basename_emg_classifier_segments.pkl files
+
+
 metadata_dir = os.path.join(dirname, 'all_info_files')
 metadata_dir = Path(metadata_dir)   # convert string to Path object
 

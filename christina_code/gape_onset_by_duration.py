@@ -17,6 +17,7 @@ import matplotlib.patches as mpatches
 import glob
 import matplotlib.colors as mcolors
 from matplotlib import gridspec
+import seaborn as sns
 
 # ==============================================================================
 # Load data and get setup
@@ -25,14 +26,13 @@ dirname = '/home/natasha/Desktop/christina_data/'
 file_path = os.path.join(dirname, 'christina_all_datasets.pkl')
 df = pd.read_pickle(file_path)
 
-# Create directory 
-plot_dir = os.path.join(dirname, 'gape_start_duration_time')
-os.makedirs(plot_dir, exist_ok=True)
-
-
 
 # ==============================================================================
-# %% Finding first gape bout onset and duration
+# %% Finding gaping metrics by trial
+# A gape bout is defined as 3 or more gapes in a row
+# first_gape_bout_start: first gape bout onset time (ms)
+# first_gape_bout_duration: length of time of the first gape bout (ms)
+# total_gape_time_1s: How long the rat gaping for within a 1 sec window after the first gape bout start time
 # ==============================================================================
 
 results = []
@@ -53,7 +53,7 @@ for basename_name, basename_group in df.groupby('basename'):
 
         bout_found = False
         i = 0
-        while i <= len(gapes) - 3:  # need at least 3 gapes
+        while i <= len(gapes) - 3:  # need at least 3 gapes in a row
             # Start a potential bout
             bout_indices = [i]
             
@@ -74,6 +74,19 @@ for basename_name, basename_group in df.groupby('basename'):
                 #bout_end = gapes['end_time'].iloc[-1] # last gape in the trial
                 bout_duration = bout_end - bout_start
                 
+                # ---- compute gape time in first 1-second window ----
+                win_start = bout_start
+                win_end = bout_start + 1000
+                
+                total_gape_time_1s = 0
+                for _, row in gapes.iterrows():
+                    seg_start = row['start_time']
+                    seg_end = row['end_time']
+                
+                    # inline overlap computation
+                    overlap = max(0, min(seg_end, win_end) - max(seg_start, win_start))
+                    total_gape_time_1s += overlap
+                
                 results.append({
                     'basename': basename_name,
                     'licl_conc': licl_conc,
@@ -83,7 +96,8 @@ for basename_name, basename_group in df.groupby('basename'):
                     'taste_name': taste_name,
                     'num_of_cta': num_of_cta,
                     'first_gape_bout_start': bout_start,
-                    'first_gape_bout_duration': bout_duration
+                    'first_gape_bout_duration': bout_duration,
+                    'total_gape_time_1s': total_gape_time_1s
                 })
                 
                 bout_found = True
@@ -103,76 +117,25 @@ for basename_name, basename_group in df.groupby('basename'):
                 'taste_name': taste_name,
                 'num_of_cta': num_of_cta,
                 'first_gape_bout_start': None,
-                'first_gape_bout_duration': None
+                'first_gape_bout_duration': None,
+                'total_gape_time_1s': None
             })
 
 
 # Convert to dataframe
 bout_df = pd.DataFrame(results)
 
+output_file_path = os.path.join(dirname, 'gape_metrics_by_trial.pkl')
+bout_df.to_pickle(output_file_path)
+
+print(f"DataFrame gape_metrics_by_trial.pkl successfully saved to {output_file_path}")    
+
+
+
 max_y_value = bout_df['first_gape_bout_duration'].max()
 max_y_rounded = math.ceil(max_y_value / 100) * 100
 max_y_rounded = 5100
 
-
-#%% NUM OF VALID BOUTS
-results = []
-
-for basename_name, basename_group in df.groupby('basename'):
-    for (trial_num, taste_name), trial_group in basename_group.groupby(['trial', 'taste_name']):
-        gapes = trial_group[trial_group['event_type'] == 'gape'].copy()
-        gapes['start_time'] = gapes['segment_bounds'].apply(lambda x: x[0])
-        gapes['end_time'] = gapes['segment_bounds'].apply(lambda x: x[1])
-        
-        gapes = gapes[gapes['start_time'] > 2000].copy()
-        gapes = gapes.sort_values('start_time').reset_index(drop=True)
-        
-        exp_day_type = basename_group['exp_day_type'].iloc[0]
-        exp_day_num = basename_group['exp_day_num'].iloc[0]
-        
-        num_valid_bouts = 0
-        first_bout_start = None
-        i = 0
-        while i <= len(gapes) - 3:  # need at least 3 gapes
-            # Start a potential bout
-            bout_indices = [i]
-            
-            # Extend the bout while gap < 250ms
-            j = i
-            while j < len(gapes) - 1:
-                gap = gapes.loc[j+1, 'start_time'] - gapes.loc[j, 'end_time']
-                if gap < 250:
-                    bout_indices.append(j+1)
-                    j += 1
-                else:
-                    break
-            
-            # Check if the bout has at least 3 gapes
-            if len(bout_indices) >= 3:
-                num_valid_bouts += 1
-                # Record start of first valid bout
-                if first_bout_start is None:
-                    first_bout_start = gapes.loc[bout_indices[0], 'start_time']
-                # Move i to next gape after current bout to avoid double-counting
-                i = bout_indices[-1] + 1
-            else:
-                i += 1
-
-        # Append results for this trial
-        results.append({
-            'basename': basename_name,
-            'exp_day_type': exp_day_type,
-            'exp_day_num': exp_day_num,
-            'trial_num': trial_num,
-            'taste_name': taste_name,
-            'first_gape_bout_start': first_bout_start,
-            'first_gape_bout_duration': num_valid_bouts
-        })
-
-# Convert to dataframe
-bout_df = pd.DataFrame(results)
-
-max_y_rounded = 5
 
 # ==============================================================================
 # %% Scatter plot - unique figure by taste + basename
@@ -473,6 +436,9 @@ if not train_df.empty:
 # %% Bar plot - getting setup
 # ==============================================================================
 filter_licl_conc = '0.6M_LiCl'
+var_to_plot = 'total_gape_time_1s' #Use: 'first_gape_bout_start', 'first_gape_bout_duration', or 'total_gape_time_1s',
+taste_on_train_days = 'saccharin'
+taste_on_final_test_day = 'highqhcl'
 
 # ==============================================================================
 # Set up folders for saving figures
@@ -486,9 +452,6 @@ png_files = glob.glob(os.path.join(sub_dir, '*.png'))
 for file in png_files:
     os.remove(file)
 
-# Create subdirectory based on concentration
-sub_dir = os.path.join(plot_dir, 'barplot')
-os.makedirs(sub_dir, exist_ok=True)
 
 
 # ==============================================================================
@@ -510,13 +473,14 @@ bout_df["session_trial_split"] = (bout_df["trial_num"] > midpoint).astype(int)
 # --- Filter datasets ---
 train_df = bout_df[
     (bout_df['num_of_cta'] < 4.0) &
+    (bout_df['taste_name'] == taste_on_train_days) &
     (bout_df['licl_conc'] == filter_licl_conc)
 ]
 
 test_df = bout_df[
     (bout_df['num_of_cta'] == 4.0) &
     (bout_df['licl_conc'] == filter_licl_conc) & 
-    (bout_df['taste_name'] == 'highqhcl')
+    (bout_df['taste_name'] == taste_on_final_test_day)
 ]
 
 
@@ -537,20 +501,20 @@ gs = gridspec.GridSpec(1, 2, width_ratios=widths)
 # --- Train subplot ---
 ax1 = fig.add_subplot(gs[0])
 train_box_data = [
-    train_df.loc[train_df['num_of_cta'] == c, 'first_gape_bout_start'].dropna().tolist()
+    train_df.loc[train_df['num_of_cta'] == c, var_to_plot].dropna().tolist()
     for c in train_days
 ]
 
 ax1.boxplot(train_box_data, labels=train_days)
 ax1.set_xlabel("Number of CTAs")
-ax1.set_ylabel("First Gape Onset (ms)")
-ax1.set_title("Train Days")
+ax1.set_ylabel(var_to_plot)
+ax1.set_title(f"Train Days ({taste_on_train_days})")
 
 
 # --- Test subplot ---
 ax2 = fig.add_subplot(gs[1], sharey=ax1)
 test_box_data = [
-    test_df.loc[test_df['num_of_cta'] == c, 'first_gape_bout_start'].dropna().tolist()
+    test_df.loc[test_df['num_of_cta'] == c, var_to_plot].dropna().tolist()
     for c in test_days
 ]
 
@@ -581,7 +545,7 @@ def get_split_box_data(df, day_list):
     for day in day_list:
         day_df = df[df['num_of_cta'] == day]
         for split in [0, 1]:
-            split_vals = day_df.loc[day_df['session_trial_split'] == split, 'first_gape_bout_start'].dropna().tolist()
+            split_vals = day_df.loc[day_df['session_trial_split'] == split, var_to_plot].dropna().tolist()
             all_data.append(split_vals)
             labels.append(f"{day} S{split}")
     return all_data, labels
@@ -591,8 +555,8 @@ ax1 = fig.add_subplot(gs[0])
 train_box_data, train_labels = get_split_box_data(train_df, train_days)
 ax1.boxplot(train_box_data, labels=train_labels)
 ax1.set_xlabel("Number of CTAs / Session")
-ax1.set_ylabel("First Gape Bout Start (ms)")
-ax1.set_title("Train Days")
+ax1.set_ylabel(var_to_plot)
+ax1.set_title("Train Days ({taste_on_train_days})")
 
 # --- Test subplot ---
 ax2 = fig.add_subplot(gs[1], sharey=ax1)
@@ -600,6 +564,166 @@ test_box_data, test_labels = get_split_box_data(test_df, test_days)
 ax2.boxplot(test_box_data, labels=test_labels)
 ax2.set_title("Test Day")
 ax2.tick_params(labelleft=False)  # hide duplicate y labels
+
+plt.tight_layout()
+plt.show()
+
+# %%
+
+# --- Create figure with custom width ratios ---
+fig = plt.figure(figsize=(10, 5))
+gs = gridspec.GridSpec(1, 2, width_ratios=widths)
+
+# ---------------------- TRAIN SUBPLOT ----------------------
+train_plot_df = train_df[['num_of_cta', var_to_plot]].dropna()
+test_plot_df = test_df[['num_of_cta', var_to_plot]].dropna()
+test_plot_df['num_of_cta'] = 'final test day'   # collapse to single label if desired
+
+# ---------------------- TRAIN SUBPLOT ----------------------
+ax1 = fig.add_subplot(gs[0])
+
+train_plot_df = train_df[['num_of_cta', var_to_plot]].dropna()
+sns.stripplot(
+    data=train_plot_df,
+    x='num_of_cta',
+    y=var_to_plot,
+    ax=ax1
+)
+
+ax1.set_xlabel("Number of CTAs")
+ax1.set_ylabel(var_to_plot)
+ax1.set_title("Train Days ({taste_on_train_days})")
+
+# ---------------------- TEST SUBPLOT ----------------------
+ax2 = fig.add_subplot(gs[1], sharey=ax1)
+
+sns.stripplot(
+    data=test_plot_df,
+    x='num_of_cta',
+    y=var_to_plot,
+    ax=ax2
+)
+
+# share y-axis + hide redundant labels
+ax2.get_shared_y_axes().join(ax1, ax2)
+ax2.tick_params(labelleft=False)
+
+ax2.set_title(f"Test Day ({taste_on_final_test_day})")
+
+plt.tight_layout()
+plt.show()
+
+# %%
+
+from scipy.stats import kruskal
+
+# Gather all groups
+groups = []
+
+# train groups
+for c in train_days:
+    g = train_df.loc[train_df['num_of_cta'] == c, 'first_gape_bout_start'].dropna().values
+    groups.append(g)
+
+# test group
+test_group = test_df['first_gape_bout_start'].dropna().values
+groups.append(test_group)
+
+# Run test
+stat, p = kruskal(*groups)
+kw_stat, kw_p = kruskal(*groups)
+print("Kruskal-Wallis H =", stat)
+print("p-value =", p)
+
+import scikit_posthocs as sp
+
+# build combined dataframe
+all_df = []
+
+for c in train_days:
+    temp = train_df.loc[train_df['num_of_cta'] == c, ['num_of_cta', 'first_gape_bout_start']].dropna()
+    #temp = temp.rename(columns={'first_gape_bout_start': 'Value'})
+    all_df.append(temp)
+
+test_temp = test_df[['num_of_cta', 'first_gape_bout_start']].dropna()
+#test_temp = test_temp.rename(columns={'first_gape_bout_start': 'Value'})
+test_temp['num_of_cta'] = 'final test day'
+all_df.append(test_temp)
+
+plot_df = pd.concat(all_df)
+#plot_df = plot_df.rename(columns={'num_of_cta': 'Condition'})
+
+# Dunn post-hoc test
+dunn = sp.posthoc_dunn(plot_df, val_col='first_gape_bout_start', group_col='num_of_cta')
+print(dunn)
+
+# %%
+# ----------------------------------------------------
+# 2) RUN KRUSKAL–WALLIS + POST-HOC DUNN TEST
+# ----------------------------------------------------
+
+
+# ----------------------------------------------------
+# 3) PLOTTING: BAR + STRIP + SIGNIFICANCE BARS
+# ----------------------------------------------------
+plt.figure(figsize=(10,5))
+
+# BAR PLOT (mean ± SEM) -----------------------------
+sns.barplot(
+    data=plot_df,
+    x='num_of_cta',
+    y='first_gape_bout_start',
+    errorbar='sd',            # or "sd"/None
+    color="lightgray",
+    edgecolor="black"
+)
+
+# STRIP PLOT OVERLAY -------------------------------
+sns.stripplot(
+    data=plot_df,
+    x='num_of_cta',
+    y='first_gape_bout_start',
+    color='black',
+    size=4,
+    jitter=True
+)
+
+plt.ylabel("First Gape Onset (ms)")
+plt.title("Train + Test Conditions")
+
+# ----------------------------------------------------
+# 4) SIGNIFICANCE BARS
+# ----------------------------------------------------
+def add_sig_bar(ax, x1, x2, y, p, h=0.05):
+    """Draws significance bar between x1 and x2 at height y."""
+    ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], color='black', lw=1)
+    if p < 0.001:
+        text = "***"
+    elif p < 0.01:
+        text = "**"
+    elif p < 0.05:
+        text = "*"
+    else:
+        text = "ns"
+    ax.text((x1+x2)/2, y+h, text, ha='center', va='bottom', fontsize=12)
+
+ax = plt.gca()
+
+# Automatically place sig bars above the max value
+y_max = plot_df['first_gape_bout_start'].max()
+offset = (y_max * 0.05)
+
+conditions = plot_df['num_of_cta'].unique()
+# Example: add sig bars for all comparisons against the test day
+test_idx = len(conditions) - 1
+test_label = conditions[-1]
+
+y_level = y_max + offset
+
+for i, c in enumerate(conditions[:-1]):
+    pval = dunn.loc[c, test_label]
+    add_sig_bar(ax, i, test_idx, y_level, pval)
+    y_level += offset  # stack bars upward
 
 plt.tight_layout()
 plt.show()

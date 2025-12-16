@@ -2,10 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 Created on Tue Dec 17 15:13:11 2024
-
 @author: natasha
 
-This script will overwrie the original data file and remove any multimodal waveforms.
+Detect and remove multimodal EMG waveforms from MTM segments using self cross-correlation.
+
+Inputs:
+- `{dirname}/all_datasets_emg_pred.pkl` -> initialized and cleaned XGB EMG dataset
+
+Outputs:
+- Overwritten `{dirname}/all_datasets_emg_pred.pkl` without multimodal segments
+- `{dirname}/multimodal_analysis/` containing plots
 
 """
 
@@ -16,11 +22,15 @@ import umap
 import glob
 from scipy import signal
 from scipy.signal import find_peaks
+# REQUIRED: Run file mtm_analysis_config.py (F5) in Spyder after each restart
+# enables import of required variables into any downstream script
 from mtm_analysis_config import dirname
+
 
 # ==============================================================================
 # Load data and get setup
 # ==============================================================================
+
 file_path = os.path.join(dirname, 'all_datasets_emg_pred.pkl')
 df = pd.read_pickle(file_path)
 
@@ -31,10 +41,10 @@ mtm_bool = df.event_type.str.contains('MTMs')
 mtm_df_all = df.loc[mtm_bool]
 
 
-
 # ==============================================================================
 # Create folder for saving plots
 # ==============================================================================
+
 multimodal_dir = os.path.join(dirname, 'multimodal_analysis')
 os.makedirs(multimodal_dir, exist_ok=True)
 # Remove any files in new folder
@@ -43,13 +53,14 @@ for file in all_files:
     os.remove(file)
 
 
+# ==============================================================================
+# %% Detect multimodal segments by self cross-correlation (using non-normalized segments)
+# - Only positive lags are considered
+# - Multiple peaks in the correlation indicate multiple prominent modes
+# - Segment is labeled 'yes' if multimodal, 'no' if unimodal
 
-# %% Test which waveforms are bimodal (using non-normalized waveforms)
 # ==============================================================================
-# Compute the cross-correlation of each waveform with itself
-# Examine the cross-correlation function (at only positive lag values) for peaks
-# -> Multi-modal waveforms have 1 or more peaks 
-# ==============================================================================
+
 df['multimodal'] = 'n/a' # Create column called 'multimodal' with n/a as default
 
 multi_segments = []
@@ -74,7 +85,7 @@ for index, row in mtm_df_all.iterrows():
         df.loc[index, 'multimodal'] = 'no'
     
     ## Use code below to plot each waveform and its cross-correlation. 
-    ## WARNING: Too many waveforms - it takes hours and then crashes 
+    ## WARNING: Too many waveforms with full dataset - it takes hours and then crashes 
     '''
     fig, (ax_seg, ax_corr) = plt.subplots(2,1, figsize=(7,10))
     ax_seg.plot(row['segment_raw'])
@@ -87,16 +98,20 @@ for index, row in mtm_df_all.iterrows():
 perc_multimodal = len(multi_segments)/(len(multi_segments) + len(uni_segments))*100
 print(f"Percent of multimodal waveforms removed out of all MTMs: {perc_multimodal}")
 
-# %% Overwrite data file with multimodal segments removed
+
+# ==============================================================================
+# %% Overwrite data file with only unimodal MTM segments
 # ==============================================================================
 df_filter_multimodal = df[df['multimodal'] != 'yes'] # Remove multimodal from df
 df_filter_multimodal.to_pickle(file_path) # Overwrite and save dataset
 
 
+# ==============================================================================
 # %% Plots for visualizing uni/multimodal waveforms
+# First plot: all unimodal then all multimodal waveforms overlapped
+# - Helps visually inspect differences in waveform shapes
 # ==============================================================================
-# Plot all uni/multimodal segments overlapped
-# ==============================================================================
+
 ## N.B.: Using normalized segments just for plotting
 fig, (ax_uni, ax_multi) = plt.subplots(2, 1, figsize=(8, 8))
 
@@ -123,8 +138,9 @@ plt.show()
 
 
 # ==============================================================================
-# Plot waveforms in UMAP space to see if multi/unimodal waveforms cluster
+# Plot waveform segements in UMAP space to see if multi/unimodal waveforms cluster
 # ==============================================================================
+
 # Initialize UMAP reduction
 reducer = umap.UMAP()
 new_mtm_bool = df.event_type.str.contains('MTMs')
@@ -147,3 +163,4 @@ plt.legend(title='Multimodal', loc='upper right')
 umap_plt_path = os.path.join(multimodal_dir, 'UMAP_waveforms_by_modality.png')
 plt.savefig(umap_plt_path)
 plt.show()
+

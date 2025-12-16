@@ -1,9 +1,25 @@
 # -*- coding: utf-8 -*-
 """
-Spyder Editor
+Session-by-session clustering of MTM EMG segments with PCA + GMM, and UMAP visualization;
+Optional BIC and Mahalanobis distance calculation.
 
-This is a temporary script file.
+Inputs:
+- `{dirname}/all_datasets_emg_pred.pkl`
+- Parameters from `mtm_analysis_config.py` (`iterations`, `fixed_cluster_num`, `color_mapping`, `extra_colors`)
+
+Outputs:
+- if fixed_cluster_num = integer #:
+    • `{dirname}/clustering_results/` (UMAP plots)
+    • '{dirname}/mahalanobis_stats_data.pkl' (stats used in downstream analyses)
+   ☆ '{dirname"/clustering_df_update.pkl' (UPDATED DATAFRAME WITH CLUSTER NUMBERS FOR EACH SEGMENT ROW)
+ 
+- if fixed_cluster_num = np.nan:
+    • `{dirname}/clustering_results/` (UMAP/BIC plots)
+    • `{dirname}/clustering_results/mahalanobis_matrix/`
+    • '{dirname}/non_fixed_clust_stats_data.pkl' (stats used in downstream analyses to find optimal cluster number)
+
 """
+
 
 import numpy as np
 import os
@@ -18,6 +34,8 @@ from sklearn.decomposition import PCA
 import piecewise_regression
 from scipy.spatial.distance import mahalanobis
 from tqdm import tqdm
+# REQUIRED: Run file mtm_analysis_config.py (F5) in Spyder after each restart
+# enables import of required variables into any downstream script
 from mtm_analysis_config import dirname, iterations, fixed_cluster_num, color_mapping, extra_colors
 
 
@@ -50,21 +68,22 @@ embedding = reducer.fit_transform(scaled_mtm_features) # UMAP embedding
 # ==============================================================================
 # Prep folder for saving UMAP clustering plots
 # ==============================================================================
+
 # Create directory 
 clust_dir = os.path.join(dirname, 'clustering_results')
 os.makedirs(clust_dir, exist_ok=True)
-# Remove any png files in plots folder
-png_files = glob.glob(os.path.join(clust_dir, '*.png'))
-for file in png_files:
-    os.remove(file)
-    
+# Remove any png/svg files in plots folder
+for ext in ('*.png', '*.svg'):
+    for file_path in glob.glob(os.path.join(clust_dir, ext)):
+        os.remove(file_path)
+
 # Create directory 
 mahal_dir = os.path.join(clust_dir, 'mahalanobis_matrix')
 os.makedirs(mahal_dir, exist_ok=True)
 # Remove any png files in plots folder
-png_files = glob.glob(os.path.join(mahal_dir, '*.png'))
-for file in png_files:
-    os.remove(file)
+for ext in ('*.png', '*.svg'):
+    for file_path in glob.glob(os.path.join(mahal_dir, ext)):
+        os.remove(file_path)
 
 
 # ==============================================================================
@@ -137,13 +156,13 @@ else:
         color = tab10(i)  # RGBA tuple
         if color not in custom_colors:  # Compare RGBA directly
             custom_colors.append(color)
-
-
     cmap = ListedColormap(custom_colors)
+
 
 # ==============================================================================
 # Initialize data
 # ==============================================================================
+
 mtm_df['cluster_num'] = np.nan
 mtm_df['scaled_features'] = np.nan
 
@@ -170,14 +189,12 @@ for session in tqdm(df.session_ind.unique()):
         
         mtm_session_df['scaled_features'] = list(scaled_mtm_session) # ADDED FOR MAHAL DIST
         
-        #TODO: NEEDED TO CHECK IF I WHITENED?
         pca = PCA(n_components=0.9)
         embedding = pca.fit_transform(scaled_mtm_session)
         pca_dimmensions.append(embedding.shape[1])
         
         embedding_umap = reducer.fit_transform(scaled_mtm_session)  # UMAP embedding of PCA - for plotting
         
-
         if np.isnan(fixed_cluster_num):
             # Determine the optimal number of clusters using BIC if not given a fixed cluster number
             bic_scores = []
@@ -311,8 +328,9 @@ for session in tqdm(df.session_ind.unique()):
                 mahal_session_path_svg = os.path.join(mahal_dir, f'session_{session}_mahalanobis.svg')
                 plt.savefig(mahal_session_path_svg)
                 plt.clf()
-      
-
+     
+        
+# ==============================================================================     
 # %% Save clustering stats results to be used for stats tests
 # (NOT saving the clustering index label assignments, that's the next code section below)
 # ==============================================================================      
@@ -324,7 +342,7 @@ if not np.isnan(fixed_cluster_num): # If cluster number is fixed number, then sa
         'group': ['diag'] * len(diag_elements) + ['non_diag'] * len(non_diag_elements)
     })
 
-    output_file_path = os.path.join(dirname, 'mahalanobis_data_with_laser.pkl')
+    output_file_path = os.path.join(dirname, 'mahalanobis_stats_data.pkl')
     mahal_data.to_pickle(output_file_path)
     
     print(f"Mahalanobis DataFrame successfully saved to {output_file_path}")
@@ -337,19 +355,19 @@ if np.isnan(fixed_cluster_num): # If cluster number is variable, save stats rela
         'pca_dimmensions': pca_dimmensions
     })
 
-    output_file_path = os.path.join(dirname, 'non_fixed_clust_data_with_laser.pkl')
+    output_file_path = os.path.join(dirname, 'non_fixed_clust_stats_data.pkl')
     non_fixed_clust_data.to_pickle(output_file_path)
     
     print(f"non_fixed_clust_data DataFrame successfully saved to {output_file_path}")
 
 
-
-
-# %% # Save new dataframe with assigned cluster number index to each row (i.e. movement event)
+# ==============================================================================     
+# %% # Save new dataframe with assigned cluster number index to each row
+# If cluster number is fixed number
 # ==============================================================================
 
 if not np.isnan(fixed_cluster_num):
-    # Assign '0' to cluster_num for events where event_type is 'no movement'
+    # Assign '-2' to cluster_num for events where event_type is 'no movement'
     df.loc[df['event_type'] == 'no movement', 'cluster_num'] = -2
     
     # Assign '-1' to cluster_num for events where event_type is 'gape'
@@ -357,7 +375,7 @@ if not np.isnan(fixed_cluster_num):
     
     
     ## Save the new dataframe into a pickle file
-    output_file_path = os.path.join(dirname, 'clustering_df_update_with_laser.pkl')
+    output_file_path = os.path.join(dirname, 'clustering_df_update.pkl')
     df.to_pickle(output_file_path)
     
     print(f"DataFrame successfully saved to {output_file_path}")
